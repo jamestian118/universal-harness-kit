@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# scripts/verify
+# 说明：最小验证命令（milestone/stop/切换 CLI 前必须跑）
+# 约定：失败立刻退出；不要吞错误码；输出尽量清晰
+# 可观测性：输出 JSON 日志到 .ai/verify-log.json
+
+if [ ! -f .harness ]; then
+  echo "[verify] FAIL: 缺少 .harness 标记文件，此项目未通过 universal-harness-kit 模板创建"
+  exit 1
+fi
+
+# 毫秒级时间戳（兼容 macOS/Linux）
+now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+
+start_ts=$(now_ms)
+overall="pass"
+steps_json=""
+git_head="$(git rev-parse --verify HEAD 2>/dev/null || echo unknown)"
+
+run_step() {
+  local name="$1" cmd="$2"
+  echo "[verify] $name..."
+  local s_start s_end duration status
+  s_start=$(now_ms)
+  if eval "$cmd"; then
+    status="pass"
+  else
+    status="fail"
+    overall="fail"
+  fi
+  s_end=$(now_ms)
+  duration=$((s_end - s_start))
+  steps_json="${steps_json:+$steps_json,}{\"name\":\"$name\",\"status\":\"$status\",\"duration_ms\":$duration}"
+}
+
+write_log() {
+  mkdir -p .ai
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  printf '{"timestamp":"%s","git_head":"%s","steps":[%s],"overall":"%s"}\n' "$ts" "$git_head" "$steps_json" "$overall" > .ai/verify-log.json
+}
+
+trap write_log EXIT
+
+run_step "format" "./scripts/format"
+run_step "lint" "./scripts/lint"
+run_step "test" "./scripts/test"
+run_step "arch-check" "./scripts/arch-check"
+run_step "docs-check" "./scripts/docs-check"
+run_step "secrets-check" "./scripts/secrets-check"
+
+if [ "$overall" = "fail" ]; then
+  echo "[verify] FAIL"
+  exit 1
+fi
+
+echo "[verify] OK"

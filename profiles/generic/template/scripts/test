@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/test (generic)
+# TODO(#INIT): 替换为本项目 test 命令（不要做兼容性探测）
+
+echo "TODO(#INIT): configure test command for this project"
+exit 1

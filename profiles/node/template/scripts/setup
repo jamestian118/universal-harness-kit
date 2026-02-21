@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/setup (node)
+# 说明：安装依赖
+
+npm install
+
+echo "[setup] OK"

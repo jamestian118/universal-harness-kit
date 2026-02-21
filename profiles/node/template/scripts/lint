@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/lint (node)
+# 说明：静态检查（eslint）
+
+npm run lint

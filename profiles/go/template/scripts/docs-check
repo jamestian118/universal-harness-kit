@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/docs-check
+# 说明：最小 docs 检查，确保 system of record 的关键入口存在
+
+test -f docs/index.md
+test -f docs/architecture.md
+test -f docs/security.md
+test -f docs/quality.md
+test -f docs/docs-policy.md
+test -f docs/scripts.md
+test -f docs/reliability.md
+
+# 检查 scripts/ 下每个可执行脚本是否在 docs/scripts.md 中有记录
+missing=0
+for f in scripts/*; do
+  [ -x "$f" ] || continue
+  name=$(basename "$f")
+  if ! grep -F -x -q "### $name" docs/scripts.md; then
+    echo "[docs-check] WARN: script '$name' not documented in docs/scripts.md"
+    missing=1
+  fi
+done
+if [ "$missing" -eq 1 ]; then
+  exit 1
+fi
+
+echo "[docs-check] OK"

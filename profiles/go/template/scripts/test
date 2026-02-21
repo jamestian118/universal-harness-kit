@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/test (go)
+# 说明：运行测试
+
+go test -v ./...

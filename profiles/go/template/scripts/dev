@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/dev (go)
+# 说明：运行开发入口
+
+go run ./src

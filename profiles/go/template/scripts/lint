@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/lint (go)
+# 说明：静态检查（go vet）
+
+go vet ./...

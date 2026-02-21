@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/dev (generic)
+# TODO(#INIT): 替换为本项目 dev 命令（不要做兼容性探测）
+
+echo "TODO(#INIT): configure dev command for this project"
+exit 1

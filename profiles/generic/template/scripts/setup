@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/setup (generic)
+# TODO(#INIT): 替换为本项目 setup 命令（不要做兼容性探测）
+
+echo "TODO(#INIT): configure setup command for this project"
+exit 1

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/format (node)
+# 说明：格式化（prettier）
+
+npm run format
