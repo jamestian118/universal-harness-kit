@@ -80,6 +80,17 @@ mkdir -p "$DEST_DIR"
 # 复制模板（包含隐藏目录）
 cp -R "$SRC_DIR/." "$DEST_DIR/"
 
+# 标准化项目根 README 文件名，确保 GitHub 可直接识别
+if [[ ! -f "$DEST_DIR/README.md" ]]; then
+  ALT_README="$(find "$DEST_DIR" -maxdepth 1 -type f \( -iname 'readme' -o -iname 'readme.*' \) | head -n 1 || true)"
+  if [[ -n "$ALT_README" ]]; then
+    mv "$ALT_README" "$DEST_DIR/README.md"
+  else
+    echo "模板缺少项目根 README：$SRC_DIR/README.md"
+    exit 2
+  fi
+fi
+
 # 占位符替换：__PROJECT_NAME__
 python3 - <<PY
 import os

@@ -38,6 +38,8 @@ chmod +x ./new_project.sh
 
 `$HOME/Documents/Code/<project-name>/`
 
+新项目根文档会被强制标准化为 `README.md`（大写），确保 GitHub 默认可识别展示。
+
 进入项目并初始化（根据 profile 不同略有差异，但都应以 scripts 为准）：
 
 ```bash
@@ -73,6 +75,7 @@ cd $HOME/Documents/Code/<project-name>
 - `.ai/handoff.md` 新增 `Lessons Learned` 字段（反馈循环）
 - 失败可复现机制（`conftest.py` / `test-reporter` / `-v` flag）
 - `new_project.sh` 现在自动 `git init` + 配置 hook + 首次 commit；若 `.githooks/pre-commit` 缺失或不可执行会 fail-fast 退出
+- `new_project.sh` 现在会强制校验项目根 `README.md`（若模板存在 `readme.*` 变体会自动标准化）
 
 ### 说明
 - 该模板包只负责”把正确的文件放到正确的位置 + 给出稳定入口”。具体业务与工具链可后续由 agent 按你的指令在项目内调整。
@@ -113,6 +116,8 @@ chmod +x ./scripts/*
 ./scripts/verify
 ```
 
+The project root documentation is enforced as `README.md` (uppercase) so GitHub can recognize and render it directly.
+
 ### Regression Command (Milestone Cleanup Flow)
 Use this one-liner to regress the closeout chain `verify -> dry-run -> confirm -> apply`:
 
@@ -139,3 +144,4 @@ Expected behavior:
 - `.ai/handoff.md` now includes a `Lessons Learned` field (feedback loop)
 - Failure reproducibility (`conftest.py` / `test-reporter` / `-v` flag)
 - `new_project.sh` now auto-runs `git init` + configures hooks + initial commit; it fails fast if `.githooks/pre-commit` is missing or not executable
+- `new_project.sh` now enforces a root `README.md` (and auto-normalizes `readme.*` variants when found)

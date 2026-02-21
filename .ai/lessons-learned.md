@@ -23,3 +23,7 @@ agent 在每次 handoff 时，除了写项目内的 .ai/handoff.md，还必须�
 - 2026-02-21 [universal-harness-kit]: agent 在截图/视频迭代中产生冗余 artifacts 且缺少统一清理触发点 → 临时产物生命周期未建模（目录、验收闸门、人工确认）→ 已升级为 golden principle 并机械化落地 `scripts/finalize-artifacts` + `scripts/milestone-finalize`（verify + confirm 后清理）
 - 2026-02-21 [universal-harness-kit]: artifacts 清理流程虽已脚本化，但里程碑收尾仍依赖人工记忆导致执行不一致 → 缺少 closeout 固定清单入口 → 已接入 `.codex/.claude` 的 `/closeout` 清单并在 KIT_README 增加回归命令；同类问题第 2 次，已完成从规则到机械化流程的升级
 - 2026-02-21 [patrol-final-acceptance-kit]: `demo_final_60s.mp4` 为 headless 文字拼片却被错误当作 Item9 最终展示成片 → 验收口径里“脚本可生成视频”与“GUI 实录可展示”未分离，缺少实录真伪闸门 → 建议升级为机械化检查：凡标记“最终展示”的视频必须同时满足 `x11grab 来源证明 + 对照抽帧含 GUI 窗口`，否则自动降级为内部证据片
+- 2026-02-22 [bulk-github-publish]: 批量推送时包含 `.github/workflows/*` 的仓库被 GitHub 拒绝（OAuth token 无 `workflow` scope）→ 凭据 scope 与内容类型不匹配 → 建议升级为机械化检查：发布前先探测 token scopes，缺 `workflow` 时自动提示“删除 workflow 文件或切换 PAT scope”
+- 2026-02-22 [bulk-github-publish]: 路径脱敏规则对 `$HOME` 未生效（仅替换了 `/Users/...`）→ 使用了不适配斜杠前缀的 `\b` 边界正则 → 建议升级为 golden principle：路径脱敏统一用“平台路径样例回放测试”（/Users、/home、C:\\Users）后再跑全量发布
+- 2026-02-22 [multi-repo-readme-standardization]: 多项目发布前容易出现“主文档命名不一致”（如 `KIT_README.md`）导致 GitHub 展示不稳定 → 缺少创建入口的 README 命名硬约束与跨 CLI 默认发布语义一致性 → 建议机械化：在项目生成脚本中强制校验根 `README.md`，并在 Codex/Claude 全局指令同步“提交 GitHub=脱敏+分级+发布”
+- 2026-02-22 [github-publish-contract]: 仅靠“记忆偏好”不足以保证长期一致执行，跨 CLI 会出现执行口径漂移 → 缺少可机读、可验收的发布契约定义（输入触发词、分级标准、必交付物）→ 已升级为标准化约束：全局 AGENTS + Claude 规则同步 `sanitize -> classify -> publish` 与结果校验闭环
