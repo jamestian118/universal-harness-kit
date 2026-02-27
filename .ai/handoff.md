@@ -207,3 +207,38 @@
 ## 当前状态：[已完成 Phase 4 UHK lane 4.7/4.8；新增 tests/test_new_project.sh 与 tests/test_policy_stack.sh；scripts/verify 已纳入 shell_tests；修复 new_project.sh 在 unsupported --lang 分支的 unbound variable；同步 docs/verify.usage.zh-en.md 与 docs/new_project.usage.zh-en.md]
 ## 下一步：[1) 若 CI 需强制 shellcheck，可在 runner 安装 shellcheck 后复跑 scripts/verify 2) 若要扩展回归维度，可继续补充 tests/ 下更多 strict-profile 场景（如 contract drift/fail reason 细粒度断言）]
 ## 已知问题：[当前环境未安装 shellcheck，scripts/verify 输出 WARN 后跳过；其余步骤与 shell_tests 均通过]
+
+---
+
+## Milestone Update (2026-02-27): Phase 5 Gate Lane Matrix (UHK support lane)
+
+## Goal / DoD
+- 目标：产出 Gate 5 执行矩阵（固定 6 仓 `verify + tests`）并提供可填写汇总模板。
+- DoD：
+  - 新增 `.ai/tmp-phase5-gate-commands.md`，包含逐仓命令、输出落盘路径、汇总表。
+  - 在 UHK root 执行 strict 并记录 `strict_result`。
+
+## Evidence (Commands + Key Output)
+1. strict gate
+- Command:
+  - `./scripts/agent-policy-stack --tool codex --cwd "$PWD" --strict --strict-profile harness`
+- Key output:
+  - `strict_result=pass`
+  - `copy_project_root_relaxed: warn`
+
+2. 固定 6 仓脚本入口探测
+- Command:
+  - `for repo in <6 repos>; do [ -f scripts/verify ] ...; [ -f scripts/test ]/[ -f scripts/tests ] ...; done`
+- Key output:
+  - `scripts/verify`: 6/6 present
+  - `scripts/test(s)`: 2/6 present (`oh-my-orch`, `uhk-audit-20260226-224224`)
+
+## Done
+- 新增文件：`.ai/tmp-phase5-gate-commands.md`
+  - 包含 6 仓 Gate 5 `verify + tests` 命令矩阵
+  - 包含 `.ai/tmp-phase5-*.out` 输出命名约定
+  - 包含 verify/tests 汇总模板表格
+
+## 当前状态：[已完成 UHK Phase 5 gate lane 文档产物；strict 已执行并 pass（strict_result=pass，copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase5-gate-commands.md]
+## 下一步：[1) 按矩阵逐仓执行 verify/tests 并填汇总表 2) 对缺失 `scripts/test(s)` 的 4 仓确认 tests 口径（n-a 或补统一入口）3) 将汇总结果写回 handoff]
+## 已知问题：[`claude-code-api-config`/`claude-session-manager`/`cli-handoff-bundle`/`git-privacy-guard` 暂无统一 `scripts/test(s)`；当前模板默认 `NO_STANDARD_TEST_ENTRY`]
