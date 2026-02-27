@@ -8,11 +8,12 @@ OUTPUT_JSON=0
 STRICT=0
 STRICT_PROFILE="compat"
 STRICT_PROFILE_EXPLICIT=0
+SELF_TEST=0
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>]
+  ./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>] [--self-test]
 
 Options:
   --tool <codex|claude|gemini>
@@ -37,6 +38,9 @@ Options:
                Exception: when cwd is HOME or WORKFLOW_ROOT, the
                copy_project_root requirement is relaxed with a WARN.
 
+  --self-test
+      Run built-in regression checks for agent-policy-stack and exit.
+
   -h, --help
       Show this help.
 USAGE
@@ -45,6 +49,28 @@ USAGE
 fail() {
   echo "[$SCRIPT_NAME] FAIL: $*" >&2
   exit 2
+}
+
+self_test_fail() {
+  echo "[$SCRIPT_NAME][self-test] FAIL: $*" >&2
+  exit 1
+}
+
+run_self_test() {
+  local workflow_root="$1"
+  local syntax_target="$workflow_root/scripts/agent-policy-stack"
+  local test_target="$workflow_root/tests/test_policy_stack.sh"
+
+  [ -f "$syntax_target" ] || self_test_fail "missing script: $syntax_target"
+  [ -x "$test_target" ] || self_test_fail "missing executable test: $test_target"
+
+  echo "[$SCRIPT_NAME][self-test] RUN: bash -n $syntax_target"
+  bash -n "$syntax_target"
+
+  echo "[$SCRIPT_NAME][self-test] RUN: tests/test_policy_stack.sh"
+  AGENT_POLICY_STACK_IN_SELF_TEST=1 "$test_target"
+
+  echo "[$SCRIPT_NAME][self-test] PASS"
 }
 
 json_escape() {
@@ -241,6 +267,10 @@ while [ "$#" -gt 0 ]; do
       STRICT_PROFILE_EXPLICIT=1
       shift 2
       ;;
+    --self-test)
+      SELF_TEST=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -272,6 +302,12 @@ esac
 CWD="$(cd "$CWD" && pwd -P)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 WORKFLOW_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+
+if [ "$SELF_TEST" -eq 1 ]; then
+  run_self_test "$WORKFLOW_ROOT"
+  exit 0
+fi
+
 case "$TOOL" in
   codex)
     GLOBAL_FILE="${HOME}/.codex/AGENTS.md"

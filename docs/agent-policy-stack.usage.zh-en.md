@@ -30,7 +30,7 @@ chmod +x ./scripts/agent-policy-stack
 ### 命令总览
 
 ```bash
-./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>]
+./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>] [--self-test]
 ```
 
 ### 参数说明
@@ -44,6 +44,7 @@ chmod +x ./scripts/agent-policy-stack
     `AGENTS.md`、`.ai/handoff.md`、`scripts/verify`、`.claude/CLAUDE.md`、`.codex/commands/closeout.md`、`.gemini/GEMINI.md`
   - 例外：当 `--cwd` 为 `$HOME` 或 workflow 根目录时，脚本会输出 `WARN` 并放宽 `copy_project_root` 必需约束（用于 Global/Workflow 维护场景）
 - `--strict-profile <compat|harness>`：指定 strict 行为档位，默认 `compat`
+- `--self-test`：执行内置回归自检（`bash -n` + `tests/test_policy_stack.sh`）并退出
 - `-h, --help`：显示帮助
 
 ### 输出字段
@@ -124,11 +125,17 @@ JSON contract schema：
   | python3 -m jsonschema -i /dev/stdin ./docs/agent-policy-stack.output.schema.json
 ```
 
+6) 运行内置自检：
+
+```bash
+./scripts/agent-policy-stack --self-test
+```
+
 ### 输入 / 输出与退出码
 
 输入：
 
-- CLI flags（`--tool/--cwd/--json/--strict/--strict-profile`）
+- CLI flags（`--tool/--cwd/--json/--strict/--strict-profile/--self-test`）
 - 文件系统状态（全局策略、workflow 根、copy 项目关键文件）
 
 输出：
@@ -204,7 +211,7 @@ chmod +x ./scripts/agent-policy-stack
 ### Command Summary
 
 ```bash
-./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>]
+./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>] [--self-test]
 ```
 
 ### Options
@@ -219,6 +226,7 @@ chmod +x ./scripts/agent-policy-stack
     `AGENTS.md`, `.ai/handoff.md`, `scripts/verify`, `.claude/CLAUDE.md`, `.codex/commands/closeout.md`, `.gemini/GEMINI.md`
   - Exception: when `--cwd` is `$HOME` or workflow root, the script emits `WARN` and relaxes the `copy_project_root` requirement (for Global/Workflow maintenance contexts)
 - `--strict-profile <compat|harness>`: strict behavior profile (default: `compat`)
+- `--self-test`: run built-in regression checks (`bash -n` + `tests/test_policy_stack.sh`) and exit
 - `-h, --help`: show help
 
 ### Output Fields
@@ -299,11 +307,17 @@ Status semantics:
   | python3 -m jsonschema -i /dev/stdin ./docs/agent-policy-stack.output.schema.json
 ```
 
+6) Run built-in self-test:
+
+```bash
+./scripts/agent-policy-stack --self-test
+```
+
 ### Inputs / Outputs / Exit Codes
 
 Inputs:
 
-- CLI flags (`--tool/--cwd/--json/--strict/--strict-profile`)
+- CLI flags (`--tool/--cwd/--json/--strict/--strict-profile/--self-test`)
 - Filesystem state (global policy file, workflow root, copy project required files)
 
 Outputs:

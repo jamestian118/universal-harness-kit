@@ -90,8 +90,10 @@ cd /Users/Zhuanz/Documents/Code/<project-name>
 - `scripts/finalize-artifacts` + `scripts/milestone-finalize`：artifacts 生命周期闸门（`dry-run -> confirm -> apply`），仅在 verify 成功且人工确认后清理临时产物
 - 临时验证/测试自动化脚本规范：仅保留最终成功脚本；中间脚本统一放 `scripts/.tmp/` 或 `.ai/tmp-scripts/`，并由 `finalize-artifacts` 默认根清理
 - `scripts/publish`：标准发布入口（`milestone-finalize -> auto commit -> push -> PR -> @codex review`）
+- `scripts/bootstrap-stack`：按拓扑序安装/验证 UHK 栈（`render-global-policy -> strict gate -> self-test -> verify`），支持 `--dry-run` 与 `--root`
 - `scripts/agent-policy-stack`：统一入口检查 `Global -> Workflow -> Copy-to-project` 调用链；完整参数与示例见 `docs/agent-policy-stack.usage.zh-en.md`
 - `scripts/verify`（kit root）：脚本级最小验收入口（`bash -n` + `shellcheck` + smoke）；完整说明见 `docs/verify.usage.zh-en.md`
+- `scripts/agent-policy-stack --self-test`：内置回归自检入口（`bash -n` + `tests/test_policy_stack.sh`）
 - `docs/quality.md`：golden principles（5 条质量规则，新增 artifacts 生命周期约束）
 - `docs/architecture.md`：invariants（3 条架构不变式）
 - `.githooks/pre-commit`：commit 前自动跑 verify
@@ -102,7 +104,7 @@ cd /Users/Zhuanz/Documents/Code/<project-name>
 - 失败可复现机制（`conftest.py` / `test-reporter` / `-v` flag）
 - `new_project.sh` 现在自动 `git init` + 配置 hook + 首次 commit；若 `.githooks/pre-commit` 缺失或不可执行会 fail-fast 退出
 - `new_project.sh` 现在会强制校验项目根 `README.md`（若模板存在 `readme.*` 变体会自动标准化）
-- `new_project.sh` 现在支持 `--dest` 与 `$HARNESS_DEST_ROOT` 参数化目标目录；完整说明见 `docs/new_project.usage.zh-en.md`
+- `new_project.sh` 现在支持 `--dest`、`$HARNESS_DEST_ROOT`、`$HARNESS_CODE_ROOT` 参数化目标目录；完整说明见 `docs/new_project.usage.zh-en.md`
 
 ### 说明
 - 该模板包只负责”把正确的文件放到正确的位置 + 给出稳定入口”。具体业务与工具链可后续由 agent 按你的指令在项目内调整。
@@ -180,8 +182,10 @@ Expected behavior:
 - `scripts/finalize-artifacts` + `scripts/milestone-finalize`: artifact lifecycle gate (`dry-run -> confirm -> apply`), cleanup only after verify success and explicit human confirmation
 - Temporary validation/test automation script policy: keep only final successful scripts; place intermediate scripts in `scripts/.tmp/` or `.ai/tmp-scripts/`, and let `finalize-artifacts` clean them by default
 - `scripts/publish`: standardized publish entrypoint (`milestone-finalize -> auto commit -> push -> PR -> @codex review`)
+- `scripts/bootstrap-stack`: topological install/verification entrypoint for the UHK stack (`render-global-policy -> strict gate -> self-test -> verify`), with `--dry-run` and `--root`
 - `scripts/agent-policy-stack`: unified entrypoint to verify the `Global -> Workflow -> Copy-to-project` call chain; for full arguments and examples, see `docs/agent-policy-stack.usage.zh-en.md`
 - `scripts/verify` (kit root): minimal script-level acceptance entrypoint (`bash -n` + `shellcheck` + smoke); see `docs/verify.usage.zh-en.md`
+- `scripts/agent-policy-stack --self-test`: built-in regression self-test entrypoint (`bash -n` + `tests/test_policy_stack.sh`)
 - `docs/quality.md`: golden principles (5 quality rules, including artifact lifecycle constraints)
 - `docs/architecture.md`: invariants (3 architecture rules)
 - `.githooks/pre-commit`: auto-runs verify before each commit
@@ -192,4 +196,4 @@ Expected behavior:
 - Failure reproducibility (`conftest.py` / `test-reporter` / `-v` flag)
 - `new_project.sh` now auto-runs `git init` + configures hooks + initial commit; it fails fast if `.githooks/pre-commit` is missing or not executable
 - `new_project.sh` now enforces a root `README.md` (and auto-normalizes `readme.*` variants when found)
-- `new_project.sh` now supports destination-root parameterization via `--dest` and `$HARNESS_DEST_ROOT`; see `docs/new_project.usage.zh-en.md`
+- `new_project.sh` now supports destination-root parameterization via `--dest`, `$HARNESS_DEST_ROOT`, and `$HARNESS_CODE_ROOT`; see `docs/new_project.usage.zh-en.md`

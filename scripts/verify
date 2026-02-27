@@ -26,9 +26,11 @@ run_step() {
 step_bash_syntax() {
   bash -n \
     new_project.sh \
+    scripts/bootstrap-stack \
     scripts/agent-policy-stack \
     scripts/check-doc-file-parity \
     scripts/verify \
+    tests/test_bootstrap_stack.sh \
     tests/test_new_project.sh \
     tests/test_policy_stack.sh
 }
@@ -41,9 +43,11 @@ step_shellcheck() {
 
   shellcheck \
     new_project.sh \
+    scripts/bootstrap-stack \
     scripts/agent-policy-stack \
     scripts/check-doc-file-parity \
     scripts/verify \
+    tests/test_bootstrap_stack.sh \
     tests/test_new_project.sh \
     tests/test_policy_stack.sh
 }
@@ -145,6 +149,7 @@ PY
 }
 
 step_shell_tests() {
+  ./tests/test_bootstrap_stack.sh
   ./tests/test_new_project.sh
   ./tests/test_policy_stack.sh
 }

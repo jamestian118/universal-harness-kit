@@ -292,3 +292,84 @@
 ## 当前状态：[已完成 UHK Phase 6 support lane 文档产物；strict 与 verify 均通过；关键文件：.ai/tmp-phase6-gate-commands.md]
 ## 下一步：[1) 主线程按模板执行并回填 Gate 6 结果 2) 如 OMO/CSM help 关键词漂移，由 owner 决定是否放宽关键字门槛]
 ## 已知问题：[`./scripts/secrets-check` 当前不存在（按“若存在则执行”规则已记录 skip）]
+
+---
+
+## Milestone Update (2026-02-27): Phase 7 UHK Lane (7.1 / 7.8 / 7.9 / 7.10)
+
+## Goal / DoD
+- 目标：在 UHK root 完成 Phase 7 lane 交付：
+  - 7.1 新增 root CI workflow（shellcheck + smoke，复用现有 `scripts/verify`）
+  - 7.8 新增 `scripts/bootstrap-stack`（拓扑序安装，支持 `--dry-run` / `--root`）
+  - 7.9 `scripts/agent-policy-stack` 新增 `--self-test`
+  - 7.10 在 UHK 范围做最小路径硬编码参数化（不破坏现有行为）
+- DoD：strict pass、`./scripts/verify` pass、（若存在）`scripts/secrets-check` pass、handoff 记录完整证据。
+
+## Repo State
+- Branch: `ai/20260227-phase0-upgrade`
+- 关键改动文件：
+  - `.github/workflows/verify.yml`
+  - `scripts/bootstrap-stack`
+  - `scripts/agent-policy-stack`
+  - `scripts/verify`
+  - `tests/test_bootstrap_stack.sh`
+  - `tests/test_policy_stack.sh`
+  - `new_project.sh`
+  - `docs/bootstrap-stack.usage.zh-en.md`
+  - `docs/agent-policy-stack.usage.zh-en.md`
+  - `docs/new_project.usage.zh-en.md`
+  - `docs/verify.usage.zh-en.md`
+  - `README.md`
+
+## Evidence (Commands + Key Output)
+1. strict policy（必须项）
+- Command:
+  - `./scripts/agent-policy-stack --tool codex --cwd "$PWD" --strict --strict-profile harness`
+- Key output:
+  - `strict_result=pass`
+  - `copy_project_root_relaxed: warn`（workflow root 场景）
+
+2. verify（必须项）
+- Command:
+  - `./scripts/verify`
+- Key output:
+  - `[verify] PASS: bash_syntax`
+  - `[verify] PASS: smoke_policy_json_schema`
+  - `[verify] PASS: shell_tests`
+  - `[test_bootstrap_stack] PASS`
+  - `[test_new_project] PASS`
+  - `[test_policy_stack] PASS`
+  - `[verify] OK`
+
+3. self-test（7.9）
+- Command:
+  - `./scripts/agent-policy-stack --self-test`
+- Key output:
+  - `[agent-policy-stack][self-test] RUN: tests/test_policy_stack.sh`
+  - `[test_policy_stack] PASS`
+  - `[agent-policy-stack][self-test] PASS`
+
+4. bootstrap-stack dry-run（7.8）
+- Command:
+  - `./scripts/bootstrap-stack --dry-run`
+- Key output:
+  - `STEP 1/4: render-global-policy`
+  - `STEP 2/4: agent-policy-stack strict`
+  - `STEP 3/4: agent-policy-stack self-test`
+  - `STEP 4/4: verify`
+  - `DONE`
+
+5. secrets-check（条件项）
+- Command:
+  - `if [ -x scripts/secrets-check ]; then ./scripts/secrets-check; else echo "[secrets-check] SKIP: scripts/secrets-check not found"; fi`
+- Key output:
+  - `[secrets-check] SKIP: scripts/secrets-check not found`
+
+## Risks / Boundaries
+- 本地环境未安装 `shellcheck`，`scripts/verify` 按设计输出 WARN 并继续；CI workflow 已显式 `apt-get install shellcheck`，可在 CI 强制覆盖该检查。
+- `scripts/bootstrap-stack` 默认会执行 `render-global-policy`（非 dry-run），会写入 `~/.codex/AGENTS.md` / `~/.claude/CLAUDE.md` / `~/.gemini/GEMINI.md`；如需仅预览请使用 `--dry-run`。
+- `scripts/secrets-check` 在 kit root 当前不存在，本次无法给出 pass 证据，仅能给出 skip 证据。
+
+## 当前状态：[已完成 Phase 7 UHK lane 7.1/7.8/7.9/7.10；已补 CI + bootstrap + self-test + 路径参数化 + 双语文档；strict/verify 已通过]
+## 下一步：[1) 审核并提交本次改动 2) 如需可补一次 GitHub Actions 实跑验证 shellcheck gate 3) 若 owner 要求，可将 root verify workflow 同步到 profile template 的 workflow contract]
+## 已知问题：[本地 shellcheck 缺失仅输出 WARN；CI 已安装 shellcheck 并可强制执行]

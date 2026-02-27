@@ -33,7 +33,8 @@ cd /Users/Zhuanz/Documents/Code/universal-harness-kit
 - `--dest`：项目目标根目录（可选）
   - 优先级高于环境变量 `HARNESS_DEST_ROOT`
 - `HARNESS_DEST_ROOT`：当未传 `--dest` 时生效
-- 都未设置时默认目标根目录：`/Users/Zhuanz/Documents/Code`
+- `HARNESS_CODE_ROOT`：默认目标根目录（仅在 `--dest` 与 `HARNESS_DEST_ROOT` 都未设置时生效）
+- 默认目标根目录：`$HARNESS_CODE_ROOT`（若设置）或 `$HOME/Documents/Code`
 
 ### 示例
 
@@ -111,7 +112,8 @@ cd /Users/Zhuanz/Documents/Code/universal-harness-kit
 - `--dest`: optional destination root
   - Higher priority than `HARNESS_DEST_ROOT`
 - `HARNESS_DEST_ROOT`: used when `--dest` is not provided
-- If neither is set, default destination root is `/Users/Zhuanz/Documents/Code`
+- `HARNESS_CODE_ROOT`: default destination root (used only when both `--dest` and `HARNESS_DEST_ROOT` are unset)
+- Default destination root is `$HARNESS_CODE_ROOT` (if set) or `$HOME/Documents/Code`
 
 ### Examples
 

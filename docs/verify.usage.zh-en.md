@@ -11,7 +11,7 @@
 3. `new_project.sh --help` smoke
 4. `new_project.sh` 项目名正则校验 smoke
 5. `agent-policy-stack --json` 输出结构校验（基于 schema）
-6. shell test suites：`tests/test_new_project.sh` + `tests/test_policy_stack.sh`
+6. shell test suites：`tests/test_bootstrap_stack.sh` + `tests/test_new_project.sh` + `tests/test_policy_stack.sh`
 
 ### 前置条件
 
@@ -62,6 +62,10 @@
 - 说明：`agent-policy-stack` 的 strict/harness 行为、JSON 字段或退出码漂移
 - 处理：先单独运行 `./tests/test_policy_stack.sh`，再对照 `docs/agent-policy-stack.output.schema.json` 校验输出结构
 
+5. `shell_tests` 失败（`test_bootstrap_stack.sh`）
+- 说明：`bootstrap-stack` 的 dry-run 拓扑步骤或参数校验行为漂移
+- 处理：先单独运行 `./tests/test_bootstrap_stack.sh`，确认输出包含 4 个固定步骤
+
 ---
 
 ## English
@@ -75,7 +79,7 @@
 3. `new_project.sh --help` smoke
 4. project-name regex validation smoke for `new_project.sh`
 5. schema-based structure validation for `agent-policy-stack --json`
-6. shell test suites: `tests/test_new_project.sh` + `tests/test_policy_stack.sh`
+6. shell test suites: `tests/test_bootstrap_stack.sh` + `tests/test_new_project.sh` + `tests/test_policy_stack.sh`
 
 ### Prerequisites
 
@@ -125,3 +129,7 @@
 4. `shell_tests` fails (`test_policy_stack.sh`)
 - Meaning: `agent-policy-stack` strict/harness behavior, JSON fields, or exit codes drifted
 - Fix: run `./tests/test_policy_stack.sh` directly, then cross-check with `docs/agent-policy-stack.output.schema.json`
+
+5. `shell_tests` fails (`test_bootstrap_stack.sh`)
+- Meaning: `bootstrap-stack` dry-run topology or argument validation behavior drifted
+- Fix: run `./tests/test_bootstrap_stack.sh` directly and confirm the 4 fixed steps are present in output

@@ -210,4 +210,10 @@ exit_code="$(run_json_capture "$JSON_FILE" "$ERR_FILE" env HOME="$FAKE_HOME" \
 [[ "$exit_code" -eq 0 ]] || fail "strict harness should relax copy_project_root at workflow root, got $exit_code"
 assert_json_relaxed_warn "$JSON_FILE"
 
+if [[ "${AGENT_POLICY_STACK_IN_SELF_TEST:-0}" != "1" ]]; then
+  exit_code="$(run_capture "$OUTPUT_FILE" ./scripts/agent-policy-stack --self-test)"
+  [[ "$exit_code" -eq 0 ]] || fail "--self-test should exit 0, got $exit_code"
+  assert_output_contains "$OUTPUT_FILE" "[agent-policy-stack][self-test] PASS"
+fi
+
 echo "[test_policy_stack] PASS"

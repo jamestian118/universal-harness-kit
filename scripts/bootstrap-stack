@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="bootstrap-stack"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_ROOT="${UHK_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd -P)}"
+DEFAULT_TOOL="codex"
+
+UHK_ROOT_PATH="$DEFAULT_ROOT"
+TOOL="$DEFAULT_TOOL"
+DRY_RUN=0
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/bootstrap-stack [--root <path>] [--tool <codex|claude|gemini>] [--dry-run]
+
+Options:
+  --root <path>
+      universal-harness-kit root path.
+      Default: $UHK_ROOT (if set) or script parent directory.
+
+  --tool <codex|claude|gemini>
+      Tool context used by strict policy stack step.
+      Default: codex.
+
+  --dry-run
+      Print topological install steps without executing commands.
+
+  -h, --help
+      Show this help.
+
+Topological Steps:
+  1) render-global-policy
+  2) agent-policy-stack --strict --strict-profile harness
+  3) agent-policy-stack --self-test
+  4) scripts/verify
+USAGE
+}
+
+fail() {
+  echo "[$SCRIPT_NAME] FAIL: $*" >&2
+  exit 2
+}
+
+run_step() {
+  local label="$1"
+  shift
+  local cmd=("$@")
+
+  echo "[$SCRIPT_NAME] $label"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[%s] DRY-RUN:' "$SCRIPT_NAME"
+    printf ' %q' "${cmd[@]}"
+    printf '\n'
+    return 0
+  fi
+
+  "${cmd[@]}"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --root)
+      [ "$#" -ge 2 ] || fail "--root requires a value"
+      UHK_ROOT_PATH="$2"
+      shift 2
+      ;;
+    --tool)
+      [ "$#" -ge 2 ] || fail "--tool requires a value"
+      TOOL="$2"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "unsupported argument: $1"
+      ;;
+  esac
+done
+
+case "$TOOL" in
+  codex|claude|gemini)
+    ;;
+  *)
+    fail "--tool only supports codex|claude|gemini"
+    ;;
+esac
+
+[ -d "$UHK_ROOT_PATH" ] || fail "UHK root 不存在: $UHK_ROOT_PATH"
+UHK_ROOT_PATH="$(cd "$UHK_ROOT_PATH" && pwd -P)"
+
+RENDER_GLOBAL_POLICY="$UHK_ROOT_PATH/scripts/render-global-policy"
+AGENT_POLICY_STACK="$UHK_ROOT_PATH/scripts/agent-policy-stack"
+VERIFY_SCRIPT="$UHK_ROOT_PATH/scripts/verify"
+
+[ -x "$RENDER_GLOBAL_POLICY" ] || fail "缺少可执行脚本: $RENDER_GLOBAL_POLICY"
+[ -x "$AGENT_POLICY_STACK" ] || fail "缺少可执行脚本: $AGENT_POLICY_STACK"
+[ -x "$VERIFY_SCRIPT" ] || fail "缺少可执行脚本: $VERIFY_SCRIPT"
+
+run_step "STEP 1/4: render-global-policy" \
+  "$RENDER_GLOBAL_POLICY"
+
+run_step "STEP 2/4: agent-policy-stack strict" \
+  "$AGENT_POLICY_STACK" --tool "$TOOL" --cwd "$UHK_ROOT_PATH" --strict --strict-profile harness
+
+run_step "STEP 3/4: agent-policy-stack self-test" \
+  "$AGENT_POLICY_STACK" --self-test
+
+run_step "STEP 4/4: verify" \
+  "$VERIFY_SCRIPT"
+
+echo "[$SCRIPT_NAME] DONE"

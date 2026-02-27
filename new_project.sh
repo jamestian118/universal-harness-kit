@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # new_project.sh
-# 作用：从 profiles/<lang>/template/ 复制骨架到目标目录（默认 /Users/Zhuanz/Documents/Code/<project-name>/）
+# 作用：从 profiles/<lang>/template/ 复制骨架到目标目录（默认 $HOME/Documents/Code/<project-name>/）
 # 说明：不做 OS 兼容性探测；默认目标环境为 macOS + bash + python3
 
 usage() {
@@ -16,7 +16,11 @@ usage() {
 
   HARNESS_DEST_ROOT
       当未传 --dest 时的目标根目录
-      默认：/Users/Zhuanz/Documents/Code
+      默认：$HARNESS_CODE_ROOT（若设置）或 $HOME/Documents/Code
+
+  HARNESS_CODE_ROOT
+      new_project 默认根目录（当未传 --dest 且未设置 HARNESS_DEST_ROOT 时生效）
+      默认：$HOME/Documents/Code
 
 示例：
   ./new_project.sh demo-api --lang python
@@ -42,7 +46,8 @@ PROJECT_NAME="$1"
 shift || true
 
 LANG="python"
-DEST_ROOT="${HARNESS_DEST_ROOT:-/Users/Zhuanz/Documents/Code}"
+DEFAULT_DEST_ROOT="${HARNESS_CODE_ROOT:-$HOME/Documents/Code}"
+DEST_ROOT="${HARNESS_DEST_ROOT:-$DEFAULT_DEST_ROOT}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
