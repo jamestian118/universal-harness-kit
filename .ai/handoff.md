@@ -189,3 +189,9 @@
 1. 将 `scripts/check-doc-file-parity` 纳入发布前检查链（如 `scripts/verify` 或 CI docs-check）。
 2. 若要通过“全量 grep 安全扫描=空输出”，需单独规划历史缓存/备份清理策略。
 3. 持续在 global policy 升级时同步三端文档版本标识，避免再次漂移。
+
+---
+
+## 当前状态：[已完成 UHK Gate lane Phase1 输入盘点；新增 .ai/tmp-phase1-gate-input.md；strict 已执行并 pass（含 copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase1-gate-input.md]
+## 下一步：[1) 由 owner 确认固定 6 项目清单是否需要替换 2) 对缺少 scripts/secrets-check 的仓补齐最小脚本骨架 3) 逐仓执行 Gate1 命令模板并收集 strict 输出]
+## 已知问题：[当前固定 6 项目清单基于现状仓库约定（claude-code-api-config / claude-session-manager / cli-handoff-bundle / git-privacy-guard / oh-my-orch / uhk-audit-20260226-224224）；若治理口径变更需更新清单后重跑盘点]
