@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# render-global-policy
+# 从 canonical-global-policy.md 渲染三个 CLI 的全局配置文件
+# 用法: ./scripts/render-global-policy [--dry-run] [--check]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+WORKFLOW_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+CANONICAL="$WORKFLOW_ROOT/docs/canonical-global-policy.md"
+
+DRY_RUN=0
+CHECK_ONLY=0
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/render-global-policy [--dry-run] [--check]
+
+Options:
+  --dry-run   Show what would be written without modifying files.
+  --check     Exit non-zero if any target file is out of date.
+  -h, --help  Show this help.
+
+Renders canonical-global-policy.md into:
+  ~/.claude/CLAUDE.md
+  ~/.codex/AGENTS.md
+  ~/.gemini/GEMINI.md
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --check)   CHECK_ONLY=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "[render-global-policy] ERROR: unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ ! -f "$CANONICAL" ]; then
+  echo "[render-global-policy] ERROR: canonical file not found: $CANONICAL" >&2
+  exit 1
+fi
+
+# ── Tool definitions ──────────────────────────────────────────────
+# Each entry: tool_name target_file policy_cmd
+TOOLS=(
+  "claude:${HOME}/.claude/CLAUDE.md"
+  "codex:${HOME}/.codex/AGENTS.md"
+  "gemini:${HOME}/.gemini/GEMINI.md"
+)
+
+HARNESS_KIT="$WORKFLOW_ROOT"
+
+render_for_tool() {
+  local tool="$1"
+  local policy_cmd="${HARNESS_KIT}/scripts/agent-policy-stack --tool ${tool} --cwd \"\$PWD\" --strict --strict-profile harness"
+
+  # Strip the canonical header comment (first block between <!-- ... -->)
+  # Then substitute variables
+  awk '
+    BEGIN { in_header=0; header_done=0 }
+    /^<!-- AUTO-GENERATED SOURCE/ { in_header=1; next }
+    /^-->/ && in_header { in_header=0; header_done=1; next }
+    in_header { next }
+    { print }
+  ' "$CANONICAL" \
+    | sed "s|{{POLICY_CMD}}|${policy_cmd}|g" \
+    | sed "s|{{TOOL}}|${tool}|g"
+}
+
+# ── Main loop ─────────────────────────────────────────────────────
+stale=0
+rendered_count=0
+
+for entry in "${TOOLS[@]}"; do
+  tool="${entry%%:*}"
+  target="${entry#*:}"
+  target_dir="$(dirname "$target")"
+
+  rendered="$(render_for_tool "$tool")"
+
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    if [ ! -f "$target" ]; then
+      echo "[render-global-policy] STALE: $target does not exist"
+      stale=1
+    elif ! diff -q <(printf '%s\n' "$rendered") "$target" >/dev/null 2>&1; then
+      echo "[render-global-policy] STALE: $target differs from canonical"
+      stale=1
+    else
+      echo "[render-global-policy] OK: $target is up to date"
+    fi
+    continue
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "=== Would write: $target ==="
+    if [ -f "$target" ]; then
+      diff --unified=3 "$target" <(printf '%s\n' "$rendered") || true
+    else
+      echo "(new file, $(printf '%s\n' "$rendered" | wc -l | tr -d ' ') lines)"
+    fi
+    echo ""
+    continue
+  fi
+
+  # Actual write
+  mkdir -p "$target_dir"
+  printf '%s\n' "$rendered" > "$target"
+  rendered_count=$((rendered_count + 1))
+  echo "[render-global-policy] WROTE: $target"
+done
+
+# ── Summary & exit ────────────────────────────────────────────────
+if [ "$CHECK_ONLY" -eq 1 ]; then
+  if [ "$stale" -eq 1 ]; then
+    echo ""
+    echo "[render-global-policy] FAIL: one or more targets are stale. Run: scripts/render-global-policy"
+    exit 1
+  else
+    echo ""
+    echo "[render-global-policy] OK: all targets up to date"
+    exit 0
+  fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[render-global-policy] dry-run complete (no files modified)"
+  exit 0
+fi
+
+echo ""
+echo "[render-global-policy] Done. Rendered ${rendered_count} file(s) from canonical source."
+echo "  canonical: $CANONICAL"
+echo "  Tip: run 'agent-policy-stack --strict' to verify."

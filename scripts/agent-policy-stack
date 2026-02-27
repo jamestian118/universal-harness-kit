@@ -1,0 +1,703 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="agent-policy-stack"
+TOOL="codex"
+CWD="${PWD}"
+OUTPUT_JSON=0
+STRICT=0
+STRICT_PROFILE="compat"
+STRICT_PROFILE_EXPLICIT=0
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/agent-policy-stack [--tool <codex|claude|gemini>] [--cwd <path>] [--json] [--strict] [--strict-profile <compat|harness>]
+
+Options:
+  --tool <codex|claude|gemini>
+      Select tool context for policy-home checks. Default: codex.
+
+  --cwd <path>
+      Working directory used to locate the copy-project root. Default: current PWD.
+
+  --json
+      Emit JSON output.
+
+  --strict
+      If copy_project_root is found and any required file is missing
+      (AGENTS.md / .ai/handoff.md / scripts/verify), return non-zero.
+
+  --strict-profile <compat|harness>
+      Strict behavior profile. Default: compat.
+      compat: only enforce required files when copy_project_root is found.
+      harness: copy_project_root is required; also require
+               .claude/CLAUDE.md, .codex/commands/closeout.md,
+               and .gemini/GEMINI.md.
+               Exception: when cwd is HOME or WORKFLOW_ROOT, the
+               copy_project_root requirement is relaxed with a WARN.
+
+  -h, --help
+      Show this help.
+USAGE
+}
+
+fail() {
+  echo "[$SCRIPT_NAME] FAIL: $*" >&2
+  exit 2
+}
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+json_string_or_null() {
+  local value="$1"
+  if [ -n "$value" ]; then
+    printf '"%s"' "$(json_escape "$value")"
+  else
+    printf 'null'
+  fi
+}
+
+add_check() {
+  local name="$1"
+  local status="$2"
+  local detail="$3"
+  CHECK_NAMES+=("$name")
+  CHECK_STATUS+=("$status")
+  CHECK_DETAIL+=("$detail")
+}
+
+find_copy_project_root() {
+  local start="$1"
+  local current="$start"
+
+  while :; do
+    if [ -f "$current/AGENTS.md" ] && [ "$current" != "$HOME" ]; then
+      printf '%s\n' "$current"
+      return 0
+    fi
+
+    if [ "$current" = "/" ]; then
+      return 1
+    fi
+
+    current="$(dirname "$current")"
+  done
+}
+
+collect_secret_scan_targets() {
+  SECRET_SCAN_TARGETS=()
+
+  if [ -f "${HOME}/.claude/settings.json" ]; then
+    SECRET_SCAN_TARGETS+=("${HOME}/.claude/settings.json")
+  fi
+
+  if [ -d "${HOME}/.claude/scripts" ]; then
+    while IFS= read -r script_file; do
+      SECRET_SCAN_TARGETS+=("$script_file")
+    done < <(find "${HOME}/.claude/scripts" -type f -print | LC_ALL=C sort)
+  fi
+
+  if [ -f "${HOME}/.codex/config.toml" ]; then
+    SECRET_SCAN_TARGETS+=("${HOME}/.codex/config.toml")
+  fi
+}
+
+scan_file_for_plaintext_secrets() {
+  local file="$1"
+
+  awk -v file="$file" '
+    function ltrim(s) { sub(/^[[:space:]]+/, "", s); return s }
+    function rtrim(s) { sub(/[[:space:]]+$/, "", s); return s }
+    function trim(s)  { return rtrim(ltrim(s)) }
+    function looks_like_placeholder(v) {
+      if (v ~ /^(example|sample|dummy|changeme|replace[_-]?me|placeholder|redacted|masked|notset|unset|todo)$/) {
+        return 1
+      }
+      if (v ~ /^(your[_-]?(token|password|secret|api[_-]?key))$/) {
+        return 1
+      }
+      if (v ~ /^<[^>]+>$/) {
+        return 1
+      }
+      if (v ~ /^x{6,}$/) {
+        return 1
+      }
+      return 0
+    }
+
+    BEGIN {
+      single_quote = sprintf("%c", 39)
+    }
+
+    {
+      original = $0
+      trimmed_line = trim(original)
+      if (trimmed_line ~ /^(#|\/\/)/) {
+        next
+      }
+
+      lower = tolower(original)
+      if (match(lower, /sk-ant-[a-z0-9_-]{10,}|sk-proj-[a-z0-9_-]{10,}/)) {
+        printf "%s:%d:high_confidence_prefix\n", file, NR
+        next
+      }
+
+      if (lower !~ /(password|passwd|pwd|token|secret|api[_-]?key)[[:space:]]*[:=]/) {
+        next
+      }
+
+      value = original
+      sub(/^[^:=]*[:=][[:space:]]*/, "", value)
+      sub(/[[:space:]]*,[[:space:]]*$/, "", value)
+      sub(/[[:space:]]*;[[:space:]]*$/, "", value)
+      value = trim(value)
+
+      if (value == "") {
+        next
+      }
+
+      lower_value = tolower(value)
+      first_char = substr(value, 1, 1)
+
+      if (first_char == "$") {
+        next
+      }
+      if ((first_char == "\"" || first_char == single_quote) && substr(value, 2, 1) == "$") {
+        next
+      }
+      if (index(value, "${") > 0 || index(value, "$(") > 0) {
+        next
+      }
+      if (index(lower_value, "process.env") > 0 ||
+          index(lower_value, "os.environ") > 0 ||
+          index(lower_value, "getenv(") > 0 ||
+          index(lower_value, "keychain") > 0 ||
+          index(lower_value, "secretmanager") > 0) {
+        next
+      }
+
+      if ((first_char == "\"" || first_char == single_quote) && length(value) >= 2) {
+        last_char = substr(value, length(value), 1)
+        if (last_char == first_char) {
+          value = substr(value, 2, length(value) - 2)
+          value = trim(value)
+          lower_value = tolower(value)
+        }
+      }
+
+      if (value == "" || length(value) < 8) {
+        next
+      }
+      if (value ~ /[[:space:]]/) {
+        next
+      }
+      if (lower_value ~ /^(true|false|null|none)$/) {
+        next
+      }
+      if (looks_like_placeholder(lower_value)) {
+        next
+      }
+      if (value ~ /[*]{3,}/) {
+        next
+      }
+
+      printf "%s:%d:literal_assignment\n", file, NR
+    }
+  ' "$file"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --tool)
+      [ "$#" -ge 2 ] || fail "--tool requires a value"
+      TOOL="$2"
+      shift 2
+      ;;
+    --cwd)
+      [ "$#" -ge 2 ] || fail "--cwd requires a value"
+      CWD="$2"
+      shift 2
+      ;;
+    --json)
+      OUTPUT_JSON=1
+      shift
+      ;;
+    --strict)
+      STRICT=1
+      shift
+      ;;
+    --strict-profile)
+      [ "$#" -ge 2 ] || fail "--strict-profile requires a value"
+      STRICT_PROFILE="$2"
+      STRICT_PROFILE_EXPLICIT=1
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "unsupported argument: $1"
+      ;;
+  esac
+done
+
+case "$TOOL" in
+  codex|claude|gemini)
+    ;;
+  *)
+    fail "--tool only supports codex|claude|gemini"
+    ;;
+esac
+
+case "$STRICT_PROFILE" in
+  compat|harness)
+    ;;
+  *)
+    fail "--strict-profile only supports compat|harness"
+    ;;
+esac
+
+[ -d "$CWD" ] || fail "--cwd does not exist: $CWD"
+
+CWD="$(cd "$CWD" && pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+WORKFLOW_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+case "$TOOL" in
+  codex)
+    GLOBAL_FILE="${HOME}/.codex/AGENTS.md"
+    ;;
+  claude)
+    GLOBAL_FILE="${HOME}/.claude/CLAUDE.md"
+    ;;
+  gemini)
+    GLOBAL_FILE="${HOME}/.gemini/GEMINI.md"
+    ;;
+esac
+
+GLOBAL_CODEX_FILE="${HOME}/.codex/AGENTS.md"
+GLOBAL_CLAUDE_FILE="${HOME}/.claude/CLAUDE.md"
+GLOBAL_GEMINI_FILE="${HOME}/.gemini/GEMINI.md"
+
+COPY_PROJECT_ROOT=""
+if COPY_PROJECT_ROOT_CANDIDATE="$(find_copy_project_root "$CWD")"; then
+  COPY_PROJECT_ROOT="$COPY_PROJECT_ROOT_CANDIDATE"
+fi
+
+COPY_AGENTS_FILE=""
+if [ -n "$COPY_PROJECT_ROOT" ]; then
+  COPY_AGENTS_FILE="$COPY_PROJECT_ROOT/AGENTS.md"
+fi
+
+declare -a CHECK_NAMES=()
+declare -a CHECK_STATUS=()
+declare -a CHECK_DETAIL=()
+
+global_exists=0
+workflow_root_exists=0
+workflow_scripts_exists=0
+copy_found=0
+copy_agents_exists=0
+copy_handoff_exists=0
+copy_verify_exists=0
+copy_claude_exists=0
+copy_codex_closeout_exists=0
+copy_gemini_exists=0
+workflow_usage_exists=0
+workflow_usage_mentions_gemini=0
+workflow_usage_mentions_relax=0
+global_policy_command_matches=0
+global_policy_order_clause_exists=0
+global_policy_fail_clause_exists=0
+global_minimal_section_order_symmetric=0
+gemini_global_no_heavy_tool_rules=0
+global_no_plaintext_secrets=0
+
+if [ -f "$GLOBAL_FILE" ]; then
+  global_exists=1
+  add_check "global_file_exists" "pass" "$GLOBAL_FILE"
+else
+  add_check "global_file_exists" "fail" "$GLOBAL_FILE"
+fi
+
+if [ -d "$WORKFLOW_ROOT" ]; then
+  workflow_root_exists=1
+  add_check "workflow_root_exists" "pass" "$WORKFLOW_ROOT"
+else
+  add_check "workflow_root_exists" "fail" "$WORKFLOW_ROOT"
+fi
+
+if [ -d "$WORKFLOW_ROOT/scripts" ]; then
+  workflow_scripts_exists=1
+  add_check "workflow_scripts_exists" "pass" "$WORKFLOW_ROOT/scripts"
+else
+  add_check "workflow_scripts_exists" "fail" "$WORKFLOW_ROOT/scripts"
+fi
+
+WORKFLOW_USAGE_DOC="$WORKFLOW_ROOT/docs/agent-policy-stack.usage.zh-en.md"
+if [ -f "$WORKFLOW_USAGE_DOC" ]; then
+  workflow_usage_exists=1
+  add_check "workflow_usage_doc_exists" "pass" "$WORKFLOW_USAGE_DOC"
+else
+  add_check "workflow_usage_doc_exists" "fail" "$WORKFLOW_USAGE_DOC"
+fi
+
+if [ "$workflow_usage_exists" -eq 1 ] && grep -Fq ".gemini/GEMINI.md" "$WORKFLOW_USAGE_DOC"; then
+  workflow_usage_mentions_gemini=1
+  add_check "workflow_usage_mentions_gemini_required" "pass" "$WORKFLOW_USAGE_DOC"
+else
+  add_check "workflow_usage_mentions_gemini_required" "fail" "$WORKFLOW_USAGE_DOC"
+fi
+
+if [ "$workflow_usage_exists" -eq 1 ] && grep -Fq "copy_project_root_relaxed" "$WORKFLOW_USAGE_DOC"; then
+  workflow_usage_mentions_relax=1
+  add_check "workflow_usage_mentions_relax_warn" "pass" "$WORKFLOW_USAGE_DOC"
+else
+  add_check "workflow_usage_mentions_relax_warn" "fail" "$WORKFLOW_USAGE_DOC"
+fi
+
+expected_global_command="$WORKFLOW_ROOT/scripts/agent-policy-stack --tool $TOOL --cwd \"\$PWD\" --strict --strict-profile harness"
+if [ "$global_exists" -eq 1 ] && grep -Fq "$expected_global_command" "$GLOBAL_FILE"; then
+  global_policy_command_matches=1
+  add_check "global_policy_stack_command_matches" "pass" "$GLOBAL_FILE"
+else
+  add_check "global_policy_stack_command_matches" "fail" "$GLOBAL_FILE"
+fi
+
+if [ "$global_exists" -eq 1 ] && grep -Fq "Global -> Workflow -> Copy-to-project" "$GLOBAL_FILE"; then
+  global_policy_order_clause_exists=1
+  add_check "global_policy_order_clause_exists" "pass" "$GLOBAL_FILE"
+else
+  add_check "global_policy_order_clause_exists" "fail" "$GLOBAL_FILE"
+fi
+
+if [ "$global_exists" -eq 1 ] && grep -Fq '入口校验结果为 `fail` 时不得跳过' "$GLOBAL_FILE" && grep -Fq "copy_project_root_relaxed: warn" "$GLOBAL_FILE"; then
+  global_policy_fail_clause_exists=1
+  add_check "global_policy_fail_clause_exists" "pass" "$GLOBAL_FILE"
+else
+  add_check "global_policy_fail_clause_exists" "fail" "$GLOBAL_FILE"
+fi
+
+expected_global_headers=$'# 项目规范\n# Policy Stack（Global -> Workflow -> Copy-to-project）\n# 联网搜索（强制启用）'
+global_headers_detail="all global files include minimal sections in canonical order"
+global_minimal_section_order_symmetric=1
+for global_candidate in "$GLOBAL_CODEX_FILE" "$GLOBAL_CLAUDE_FILE" "$GLOBAL_GEMINI_FILE"; do
+  if [ ! -f "$global_candidate" ]; then
+    global_minimal_section_order_symmetric=0
+    global_headers_detail="$global_candidate missing"
+    break
+  fi
+
+  candidate_headers="$(grep -E '^# ' "$global_candidate" || true)"
+  if [ "$candidate_headers" != "$expected_global_headers" ]; then
+    global_minimal_section_order_symmetric=0
+    global_headers_detail="$global_candidate top-level sections drifted from minimal canonical order"
+    break
+  fi
+done
+
+if [ "$global_minimal_section_order_symmetric" -eq 1 ]; then
+  add_check "global_minimal_section_order_symmetric" "pass" "$global_headers_detail"
+else
+  add_check "global_minimal_section_order_symmetric" "fail" "$global_headers_detail"
+fi
+
+if [ -f "$GLOBAL_GEMINI_FILE" ] && ! grep -Eq 'Gemini CLI 工具规则|Orchestrator|Context7|Sequential Thinking|tool-specific' "$GLOBAL_GEMINI_FILE"; then
+  gemini_global_no_heavy_tool_rules=1
+  add_check "gemini_global_no_heavy_tool_rules" "pass" "$GLOBAL_GEMINI_FILE"
+else
+  add_check "gemini_global_no_heavy_tool_rules" "fail" "$GLOBAL_GEMINI_FILE"
+fi
+
+collect_secret_scan_targets
+secret_scan_count="${#SECRET_SCAN_TARGETS[@]}"
+secret_hit_count=0
+secret_hit_samples=()
+
+if [ "$secret_scan_count" -eq 0 ]; then
+  global_no_plaintext_secrets=1
+  add_check "global_no_plaintext_secrets" "pass" "no target files found (~/.claude/settings.json, ~/.claude/scripts/*, ~/.codex/config.toml)"
+else
+  for secret_target in "${SECRET_SCAN_TARGETS[@]}"; do
+    if [ ! -r "$secret_target" ]; then
+      continue
+    fi
+
+    while IFS= read -r secret_hit; do
+      [ -n "$secret_hit" ] || continue
+      secret_hit_count=$((secret_hit_count + 1))
+      if [ "${#secret_hit_samples[@]}" -lt 5 ]; then
+        secret_hit_samples+=("$secret_hit")
+      fi
+    done < <(scan_file_for_plaintext_secrets "$secret_target")
+  done
+
+  if [ "$secret_hit_count" -gt 0 ]; then
+    sample_summary="$(IFS=', '; echo "${secret_hit_samples[*]}")"
+    remaining_hits=$((secret_hit_count - ${#secret_hit_samples[@]}))
+    if [ "$remaining_hits" -gt 0 ]; then
+      sample_summary="${sample_summary} (+${remaining_hits} more)"
+    fi
+
+    add_check "global_no_plaintext_secrets" "fail" "plaintext credential candidates found: ${sample_summary}"
+  else
+    global_no_plaintext_secrets=1
+    add_check "global_no_plaintext_secrets" "pass" "checked ${secret_scan_count} file(s): ~/.claude/settings.json, ~/.claude/scripts/*, ~/.codex/config.toml"
+  fi
+fi
+
+if [ -n "$COPY_PROJECT_ROOT" ]; then
+  copy_found=1
+  add_check "copy_project_root_found" "pass" "$COPY_PROJECT_ROOT"
+
+  if [ -f "$COPY_PROJECT_ROOT/AGENTS.md" ]; then
+    copy_agents_exists=1
+    add_check "copy_agents_exists" "pass" "$COPY_PROJECT_ROOT/AGENTS.md"
+  else
+    add_check "copy_agents_exists" "fail" "$COPY_PROJECT_ROOT/AGENTS.md"
+  fi
+
+  if [ -f "$COPY_PROJECT_ROOT/.ai/handoff.md" ]; then
+    copy_handoff_exists=1
+    add_check "copy_handoff_exists" "pass" "$COPY_PROJECT_ROOT/.ai/handoff.md"
+  else
+    add_check "copy_handoff_exists" "fail" "$COPY_PROJECT_ROOT/.ai/handoff.md"
+  fi
+
+  if [ -f "$COPY_PROJECT_ROOT/scripts/verify" ]; then
+    copy_verify_exists=1
+    add_check "copy_verify_exists" "pass" "$COPY_PROJECT_ROOT/scripts/verify"
+  else
+    add_check "copy_verify_exists" "fail" "$COPY_PROJECT_ROOT/scripts/verify"
+  fi
+
+  if [ -f "$COPY_PROJECT_ROOT/.claude/CLAUDE.md" ]; then
+    copy_claude_exists=1
+    add_check "copy_claude_exists" "pass" "$COPY_PROJECT_ROOT/.claude/CLAUDE.md"
+  else
+    add_check "copy_claude_exists" "fail" "$COPY_PROJECT_ROOT/.claude/CLAUDE.md"
+  fi
+
+  if [ -f "$COPY_PROJECT_ROOT/.codex/commands/closeout.md" ]; then
+    copy_codex_closeout_exists=1
+    add_check "copy_codex_closeout_exists" "pass" "$COPY_PROJECT_ROOT/.codex/commands/closeout.md"
+  else
+    add_check "copy_codex_closeout_exists" "fail" "$COPY_PROJECT_ROOT/.codex/commands/closeout.md"
+  fi
+
+  if [ -f "$COPY_PROJECT_ROOT/.gemini/GEMINI.md" ]; then
+    copy_gemini_exists=1
+    add_check "copy_gemini_exists" "pass" "$COPY_PROJECT_ROOT/.gemini/GEMINI.md"
+  else
+    add_check "copy_gemini_exists" "fail" "$COPY_PROJECT_ROOT/.gemini/GEMINI.md"
+  fi
+
+else
+  add_check "copy_project_root_found" "skip" "not found from cwd=$CWD"
+  add_check "copy_agents_exists" "skip" "copy_project_root not found"
+  add_check "copy_handoff_exists" "skip" "copy_project_root not found"
+  add_check "copy_verify_exists" "skip" "copy_project_root not found"
+  add_check "copy_claude_exists" "skip" "copy_project_root not found"
+  add_check "copy_codex_closeout_exists" "skip" "copy_project_root not found"
+  add_check "copy_gemini_exists" "skip" "copy_project_root not found"
+fi
+
+strict_failed=0
+strict_reason=""
+strict_copy_root_required=0
+declare -a strict_required_items=()
+
+if [ "$STRICT_PROFILE" = "harness" ]; then
+  strict_copy_root_required=1
+  strict_required_items+=("AGENTS.md")
+  strict_required_items+=(".ai/handoff.md")
+  strict_required_items+=("scripts/verify")
+  strict_required_items+=(".claude/CLAUDE.md")
+  strict_required_items+=(".codex/commands/closeout.md")
+  strict_required_items+=(".gemini/GEMINI.md")
+else
+  strict_required_items+=("AGENTS.md")
+  strict_required_items+=(".ai/handoff.md")
+  strict_required_items+=("scripts/verify")
+fi
+
+if [ "$STRICT" -eq 1 ] && [ "$STRICT_PROFILE_EXPLICIT" -eq 0 ]; then
+  echo "[$SCRIPT_NAME] WARN: --strict enabled without explicit --strict-profile; defaulting to 'compat'. Consider using --strict-profile harness for full enforcement." >&2
+fi
+
+if [ "$STRICT" -eq 1 ] && [ "$strict_copy_root_required" -eq 1 ]; then
+  if [ "$CWD" = "$HOME" ] || [ "$CWD" = "$WORKFLOW_ROOT" ]; then
+    strict_copy_root_required=0
+    add_check "copy_project_root_relaxed" "warn" "cwd=$CWD is HOME or WORKFLOW_ROOT; relaxing copy_project_root requirement"
+    echo "[$SCRIPT_NAME] WARN: cwd=$CWD is HOME or WORKFLOW_ROOT; relaxing strict harness copy_project_root requirement." >&2
+  fi
+fi
+
+if [ "$STRICT" -eq 1 ]; then
+  missing_items=()
+
+  if [ "$strict_copy_root_required" -eq 1 ] && [ "$copy_found" -ne 1 ]; then
+    strict_failed=1
+    strict_reason="copy_project_root not found (required by strict-profile harness)"
+  elif [ "$copy_found" -eq 1 ]; then
+    if [ "$copy_agents_exists" -ne 1 ]; then
+      missing_items+=("AGENTS.md")
+    fi
+
+    if [ "$copy_handoff_exists" -ne 1 ]; then
+      missing_items+=(".ai/handoff.md")
+    fi
+
+    if [ "$copy_verify_exists" -ne 1 ]; then
+      missing_items+=("scripts/verify")
+    fi
+
+    if [ "$STRICT_PROFILE" = "harness" ] && [ "$copy_claude_exists" -ne 1 ]; then
+      missing_items+=(".claude/CLAUDE.md")
+    fi
+
+    if [ "$STRICT_PROFILE" = "harness" ] && [ "$copy_codex_closeout_exists" -ne 1 ]; then
+      missing_items+=(".codex/commands/closeout.md")
+    fi
+
+    if [ "$STRICT_PROFILE" = "harness" ] && [ "$copy_gemini_exists" -ne 1 ]; then
+      missing_items+=(".gemini/GEMINI.md")
+    fi
+
+    if [ "${#missing_items[@]}" -gt 0 ]; then
+      strict_failed=1
+      strict_reason="missing required files: $(IFS=', '; echo "${missing_items[*]}")"
+    fi
+  fi
+fi
+
+if [ "$STRICT" -eq 1 ]; then
+  contract_missing=()
+
+  if [ "$workflow_usage_exists" -ne 1 ]; then
+    contract_missing+=("workflow_usage_doc_exists")
+  fi
+  if [ "$workflow_usage_mentions_gemini" -ne 1 ]; then
+    contract_missing+=("workflow_usage_mentions_gemini_required")
+  fi
+  if [ "$workflow_usage_mentions_relax" -ne 1 ]; then
+    contract_missing+=("workflow_usage_mentions_relax_warn")
+  fi
+  if [ "$global_policy_command_matches" -ne 1 ]; then
+    contract_missing+=("global_policy_stack_command_matches")
+  fi
+  if [ "$global_policy_order_clause_exists" -ne 1 ]; then
+    contract_missing+=("global_policy_order_clause_exists")
+  fi
+  if [ "$global_policy_fail_clause_exists" -ne 1 ]; then
+    contract_missing+=("global_policy_fail_clause_exists")
+  fi
+  if [ "$global_minimal_section_order_symmetric" -ne 1 ]; then
+    contract_missing+=("global_minimal_section_order_symmetric")
+  fi
+  if [ "$gemini_global_no_heavy_tool_rules" -ne 1 ]; then
+    contract_missing+=("gemini_global_no_heavy_tool_rules")
+  fi
+  if [ "$global_no_plaintext_secrets" -ne 1 ]; then
+    contract_missing+=("global_no_plaintext_secrets")
+  fi
+
+  if [ "${#contract_missing[@]}" -gt 0 ]; then
+    strict_failed=1
+    if [ -n "$strict_reason" ]; then
+      strict_reason="$strict_reason; "
+    fi
+    strict_reason="${strict_reason}policy contract check failed: $(IFS=', '; echo "${contract_missing[*]}")"
+  fi
+fi
+
+if [ "$OUTPUT_JSON" -eq 1 ]; then
+  printf '{\n'
+  printf '  "tool": "%s",\n' "$(json_escape "$TOOL")"
+  printf '  "cwd": "%s",\n' "$(json_escape "$CWD")"
+  printf '  "global_file": "%s",\n' "$(json_escape "$GLOBAL_FILE")"
+  printf '  "workflow_root": "%s",\n' "$(json_escape "$WORKFLOW_ROOT")"
+  printf '  "copy_project_root": '
+  json_string_or_null "$COPY_PROJECT_ROOT"
+  printf ',\n'
+  printf '  "copy_agents_file": '
+  json_string_or_null "$COPY_AGENTS_FILE"
+  printf ',\n'
+  printf '  "strict_profile": "%s",\n' "$(json_escape "$STRICT_PROFILE")"
+  printf '  "required_checks": [\n'
+
+  idx=0
+  total="${#CHECK_NAMES[@]}"
+  while [ "$idx" -lt "$total" ]; do
+    printf '    {"name":"%s","status":"%s","detail":"%s"}' \
+      "$(json_escape "${CHECK_NAMES[$idx]}")" \
+      "$(json_escape "${CHECK_STATUS[$idx]}")" \
+      "$(json_escape "${CHECK_DETAIL[$idx]}")"
+
+    if [ "$idx" -lt $((total - 1)) ]; then
+      printf ','
+    fi
+    printf '\n'
+
+    idx=$((idx + 1))
+  done
+
+  printf '  ],\n'
+  printf '  "strict": {"enabled": %s, "profile": "%s", "copy_project_root_required": %s, "required_items": [' \
+    "$( [ "$STRICT" -eq 1 ] && echo true || echo false )" \
+    "$(json_escape "$STRICT_PROFILE")" \
+    "$( [ "$strict_copy_root_required" -eq 1 ] && echo true || echo false )"
+
+  idx=0
+  total="${#strict_required_items[@]}"
+  while [ "$idx" -lt "$total" ]; do
+    printf '"%s"' "$(json_escape "${strict_required_items[$idx]}")"
+    if [ "$idx" -lt $((total - 1)) ]; then
+      printf ','
+    fi
+    idx=$((idx + 1))
+  done
+
+  printf '], "result": "%s", "reason": %s}\n' \
+    "$( [ "$strict_failed" -eq 1 ] && echo fail || echo pass )" \
+    "$(json_string_or_null "$strict_reason")"
+  printf '}\n'
+else
+  echo "tool=$TOOL"
+  echo "cwd=$CWD"
+  echo "global_file=$GLOBAL_FILE"
+  echo "workflow_root=$WORKFLOW_ROOT"
+  echo "copy_project_root=${COPY_PROJECT_ROOT:-}"
+  echo "copy_agents_file=${COPY_AGENTS_FILE:-}"
+  echo "strict_profile=$STRICT_PROFILE"
+  echo "required_checks:"
+
+  idx=0
+  total="${#CHECK_NAMES[@]}"
+  while [ "$idx" -lt "$total" ]; do
+    echo "- ${CHECK_NAMES[$idx]}: ${CHECK_STATUS[$idx]} (${CHECK_DETAIL[$idx]})"
+    idx=$((idx + 1))
+  done
+
+  echo "strict_enabled=$( [ "$STRICT" -eq 1 ] && echo true || echo false )"
+  echo "strict_copy_project_root_required=$( [ "$strict_copy_root_required" -eq 1 ] && echo true || echo false )"
+  echo "strict_required_items=$(IFS=,; echo "${strict_required_items[*]}")"
+  echo "strict_result=$( [ "$strict_failed" -eq 1 ] && echo fail || echo pass )"
+
+  if [ -n "$strict_reason" ]; then
+    echo "strict_reason=$strict_reason"
+  fi
+fi
+
+if [ "$strict_failed" -eq 1 ]; then
+  exit 3
+fi

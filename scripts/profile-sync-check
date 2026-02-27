@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/profile-sync-check
+# 检查四套 profile 中应该一致的文件是否同步
+
+STRICT=0
+for arg in "$@"; do [ "$arg" = "--strict" ] && STRICT=1; done
+
+cd "$(dirname "$0")/.." || exit 1
+
+BASELINE="profiles/generic/template"
+PROFILES=("python" "node" "go")
+
+# 必须一致的文件（相对于 template/）
+SYNC_FILES=(
+  "AGENTS.md"
+  "scripts/verify"
+  "scripts/gc"
+  "scripts/arch-check"
+  "scripts/secrets-check"
+  "scripts/docs-check"
+  "scripts/finalize-artifacts"
+  "scripts/milestone-finalize"
+  ".claude/commands/closeout.md"
+  ".codex/commands/closeout.md"
+  ".gemini/GEMINI.md"
+  ".claude/CLAUDE.md"
+  ".github/workflows/verify.yml"
+  ".github/workflows/secrets.yml"
+  ".github/workflows/docs.yml"
+)
+
+drift=0
+echo "=== [profile-sync-check] ==="
+echo "基准: $BASELINE"
+echo ""
+
+for profile in "${PROFILES[@]}"; do
+  target="profiles/${profile}/template"
+  [ -d "$target" ] || continue
+  for file in "${SYNC_FILES[@]}"; do
+    base_file="${BASELINE}/${file}"
+    target_file="${target}/${file}"
+    [ -f "$base_file" ] || continue
+    if [ ! -f "$target_file" ]; then
+      echo "[DRIFT] ${profile}: 缺少 ${file}"
+      echo "  修复: cp '${base_file}' '${target_file}'"
+      drift=1
+    elif ! diff -q "$base_file" "$target_file" >/dev/null 2>&1; then
+      echo "[DRIFT] ${profile}: ${file} 与 generic 不一致"
+      echo "  修复: cp '${base_file}' '${target_file}'"
+      drift=1
+    fi
+  done
+done
+
+# ── 全局文件 freshness 检查（canonical vs 渲染产物）──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+RENDER_SCRIPT="${SCRIPT_DIR}/render-global-policy"
+
+echo ""
+echo "=== [global-freshness-check] ==="
+if [ -x "$RENDER_SCRIPT" ]; then
+  if "$RENDER_SCRIPT" --check 2>/dev/null; then
+    echo "[global-freshness] OK"
+  else
+    echo "[global-freshness] 全局文件与 canonical 源不同步"
+    echo "  修复: scripts/render-global-policy"
+    drift=1
+  fi
+else
+  echo "[global-freshness] SKIP: render-global-policy 不存在或不可执行"
+fi
+
+echo ""
+if [ "$drift" -eq 0 ]; then
+  echo "[profile-sync-check] OK"
+else
+  echo "[profile-sync-check] 发现 drift"
+fi
+
+[ "$STRICT" -eq 1 ] && [ "$drift" -gt 0 ] && exit 1
+exit 0

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/dev (node)
+# 说明：启动开发入口
+
+npm run dev -- "$@"

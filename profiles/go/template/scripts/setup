@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/setup (go)
+# 说明：整理 go.mod 依赖（若需要）
+
+go mod tidy
+
+echo "[setup] OK"

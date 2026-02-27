@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/test (node)
+# 说明：运行测试（node --test）
+
+node --test --test-reporter=spec

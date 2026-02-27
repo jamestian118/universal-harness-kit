@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="sanitized-publish-artifacts-scheduler"
+LABEL="com.zhuanz.sanitized_publish_artifacts_cleanup"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE_CLEANUP_SCRIPT="$REPO_ROOT/scripts/sanitized-publish-artifacts"
+
+DEFAULT_CANONICAL_ROOT="$HOME/.local/share/sanitized_publish_artifacts"
+CODE_ALIAS_ROOT="$HOME/Documents/Code/_sanitized_publish_artifacts"
+DEFAULT_ROOT="$DEFAULT_CANONICAL_ROOT"
+
+DEFAULT_DAYS=14
+DEFAULT_KEEP=3
+DEFAULT_WEEKDAY=1
+DEFAULT_HOUR=3
+DEFAULT_MINUTE=15
+
+uid_value="$(id -u)"
+DOMAIN="gui/${uid_value}"
+PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+log() {
+  echo "[$SCRIPT_NAME] $*"
+}
+
+fail() {
+  echo "[$SCRIPT_NAME] FAIL: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<USAGE
+Usage:
+  ./scripts/sanitized-publish-artifacts-scheduler <command> [options]
+
+Commands:
+  install [--days N] [--keep N] [--weekday 1-7] [--hour 0-23] [--minute 0-59] [--root DIR]
+      Install or update launchd job.
+
+  uninstall
+      Remove launchd job and plist.
+
+  status
+      Show plist status and launchctl state.
+
+  run-now
+      Trigger cleanup job immediately via launchctl.
+
+  print-plist [--days N] [--keep N] [--weekday 1-7] [--hour 0-23] [--minute 0-59] [--root DIR]
+      Print plist content to stdout.
+
+  -h, --help
+      Show help.
+
+Defaults:
+  days=14, keep=3, weekday=1, hour=3, minute=15
+  root=${DEFAULT_CANONICAL_ROOT}
+  code-alias=${CODE_ALIAS_ROOT}
+USAGE
+}
+
+require_int_in_range() {
+  local value="$1"
+  local min="$2"
+  local max="$3"
+  local name="$4"
+  [[ "$value" =~ ^[0-9]+$ ]] || fail "$name 必须是整数"
+  [ "$value" -ge "$min" ] || fail "$name 不能小于 $min"
+  [ "$value" -le "$max" ] || fail "$name 不能大于 $max"
+}
+
+parse_common_options() {
+  days="$DEFAULT_DAYS"
+  keep="$DEFAULT_KEEP"
+  weekday="$DEFAULT_WEEKDAY"
+  hour="$DEFAULT_HOUR"
+  minute="$DEFAULT_MINUTE"
+  root="$DEFAULT_ROOT"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --days)
+        [ "$#" -ge 2 ] || fail "--days 需要一个参数"
+        days="$2"
+        shift 2
+        ;;
+      --keep)
+        [ "$#" -ge 2 ] || fail "--keep 需要一个参数"
+        keep="$2"
+        shift 2
+        ;;
+      --weekday)
+        [ "$#" -ge 2 ] || fail "--weekday 需要一个参数"
+        weekday="$2"
+        shift 2
+        ;;
+      --hour)
+        [ "$#" -ge 2 ] || fail "--hour 需要一个参数"
+        hour="$2"
+        shift 2
+        ;;
+      --minute)
+        [ "$#" -ge 2 ] || fail "--minute 需要一个参数"
+        minute="$2"
+        shift 2
+        ;;
+      --root)
+        [ "$#" -ge 2 ] || fail "--root 需要一个参数"
+        root="$2"
+        shift 2
+        ;;
+      *)
+        fail "不支持的参数: $1"
+        ;;
+    esac
+  done
+
+  require_int_in_range "$days" 0 3650 "--days"
+  require_int_in_range "$keep" 0 1000 "--keep"
+  require_int_in_range "$weekday" 1 7 "--weekday"
+  require_int_in_range "$hour" 0 23 "--hour"
+  require_int_in_range "$minute" 0 59 "--minute"
+}
+
+runtime_script_for_root() {
+  local root="$1"
+  printf '%s\n' "$root/runtime/sanitized-publish-artifacts"
+}
+
+ensure_code_alias() {
+  local root="$1"
+  local alias="$CODE_ALIAS_ROOT"
+
+  mkdir -p "$(dirname "$alias")"
+
+  if [ -L "$alias" ]; then
+    local target
+    target="$(readlink "$alias")"
+    if [ "$target" != "$root" ]; then
+      log "注意: 现有 alias 指向 ${target}（当前 root=${root}）"
+    fi
+    return
+  fi
+
+  if [ -e "$alias" ]; then
+    if [ ! -d "$alias" ]; then
+      fail "alias 路径已存在且不是目录: $alias"
+    fi
+
+    mkdir -p "$root"
+    cp -R "$alias"/. "$root"/ 2>/dev/null || true
+
+    local backup
+    backup="${alias}.backup_$(date '+%Y%m%d_%H%M%S')"
+    mv "$alias" "$backup"
+    ln -s "$root" "$alias"
+    log "已迁移并改为 alias: ${alias} -> ${root}（备份: ${backup}）"
+    return
+  fi
+
+  ln -s "$root" "$alias"
+  log "已创建 alias: ${alias} -> ${root}"
+}
+
+sync_runtime_cleanup_script() {
+  local root="$1"
+  local runtime_script
+  runtime_script="$(runtime_script_for_root "$root")"
+
+  mkdir -p "$(dirname "$runtime_script")"
+  cp "$SOURCE_CLEANUP_SCRIPT" "$runtime_script"
+  chmod +x "$runtime_script"
+
+  printf '%s\n' "$runtime_script"
+}
+
+render_plist() {
+  local days="$1"
+  local keep="$2"
+  local weekday="$3"
+  local hour="$4"
+  local minute="$5"
+  local root="$6"
+  local cleanup_exec="$7"
+
+  local log_dir="$root/logs"
+  local stdout_log="$log_dir/cleanup.stdout.log"
+  local stderr_log="$log_dir/cleanup.stderr.log"
+
+  cat <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${cleanup_exec}</string>
+    <string>cleanup</string>
+    <string>--days</string>
+    <string>${days}</string>
+    <string>--keep</string>
+    <string>${keep}</string>
+    <string>--apply</string>
+    <string>--root</string>
+    <string>${root}</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>${weekday}</integer>
+    <key>Hour</key>
+    <integer>${hour}</integer>
+    <key>Minute</key>
+    <integer>${minute}</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>${stdout_log}</string>
+  <key>StandardErrorPath</key>
+  <string>${stderr_log}</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>
+PLIST_EOF
+}
+
+bootout_if_loaded() {
+  launchctl bootout "$DOMAIN" "$PLIST_PATH" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$uid_value/$LABEL" >/dev/null 2>&1 || true
+}
+
+bootstrap_agent() {
+  if launchctl bootstrap "$DOMAIN" "$PLIST_PATH" >/dev/null 2>&1; then
+    launchctl enable "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if launchctl load -w "$PLIST_PATH" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  return 1
+}
+
+cmd_install() {
+  local days keep weekday hour minute root
+  parse_common_options "$@"
+
+  [ -r "$SOURCE_CLEANUP_SCRIPT" ] || fail "找不到清理脚本: $SOURCE_CLEANUP_SCRIPT"
+
+  mkdir -p "$HOME/Library/LaunchAgents" "$root/logs" "$root/runs"
+  ensure_code_alias "$root"
+
+  local runtime_cleanup
+  runtime_cleanup="$(sync_runtime_cleanup_script "$root")"
+
+  render_plist "$days" "$keep" "$weekday" "$hour" "$minute" "$root" "$runtime_cleanup" > "$PLIST_PATH"
+
+  bootout_if_loaded
+  bootstrap_agent || fail "launchd 安装失败，请手动检查 launchctl 权限与会话状态"
+
+  log "已安装: $PLIST_PATH"
+  log "runtime script: $runtime_cleanup"
+  log "计划: 每周 weekday=$weekday ${hour}:${minute} 执行 cleanup --days $days --keep $keep --apply"
+  log "code alias: $CODE_ALIAS_ROOT"
+  log "查看状态: ./scripts/$SCRIPT_NAME status"
+}
+
+cmd_uninstall() {
+  bootout_if_loaded
+  if [ -f "$PLIST_PATH" ]; then
+    rm -f "$PLIST_PATH"
+    log "已删除: $PLIST_PATH"
+  else
+    log "plist 不存在: $PLIST_PATH"
+  fi
+}
+
+cmd_status() {
+  echo "label: $LABEL"
+  echo "plist: $PLIST_PATH"
+  echo "domain: $DOMAIN"
+  echo "default_root: $DEFAULT_ROOT"
+  echo "code_alias: $CODE_ALIAS_ROOT"
+
+  if [ -L "$CODE_ALIAS_ROOT" ]; then
+    echo "code_alias_target: $(readlink "$CODE_ALIAS_ROOT")"
+  fi
+
+  if [ -f "$PLIST_PATH" ]; then
+    echo "plist_exists: yes"
+  else
+    echo "plist_exists: no"
+  fi
+
+  if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+    echo "loaded: yes"
+    launchctl print "$DOMAIN/$LABEL" | sed -n '1,40p'
+  else
+    echo "loaded: no"
+  fi
+}
+
+cmd_run_now() {
+  if launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+    log "已触发立即执行: $DOMAIN/$LABEL"
+    return
+  fi
+
+  if launchctl start "$LABEL" >/dev/null 2>&1; then
+    log "已通过 launchctl start 触发: $LABEL"
+    return
+  fi
+
+  fail "触发失败，请先执行 install 并检查 status"
+}
+
+cmd_print_plist() {
+  local days keep weekday hour minute root
+  parse_common_options "$@"
+
+  local runtime_cleanup
+  runtime_cleanup="$(runtime_script_for_root "$root")"
+
+  render_plist "$days" "$keep" "$weekday" "$hour" "$minute" "$root" "$runtime_cleanup"
+}
+
+main() {
+  local cmd="${1:-}"
+  if [ -z "$cmd" ]; then
+    usage
+    exit 1
+  fi
+  shift || true
+
+  case "$cmd" in
+    install)
+      cmd_install "$@"
+      ;;
+    uninstall)
+      cmd_uninstall "$@"
+      ;;
+    status)
+      [ "$#" -eq 0 ] || fail "status 不接受参数"
+      cmd_status
+      ;;
+    run-now)
+      [ "$#" -eq 0 ] || fail "run-now 不接受参数"
+      cmd_run_now
+      ;;
+    print-plist)
+      cmd_print_plist "$@"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      fail "不支持的命令: $cmd"
+      ;;
+  esac
+}
+
+main "$@"

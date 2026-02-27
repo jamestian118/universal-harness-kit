@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# scripts/format (go)
+# 说明：格式化 Go 文件（gofmt）
+
+gofmt -w ./src ./tests

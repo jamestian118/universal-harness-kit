@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="check-doc-file-parity"
+TARGET_ROOT="${PWD}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/check-doc-file-parity [project_root]
+
+Checks:
+  1) Whether README-declared commands files/directories exist.
+  2) Whether workflow version strings are consistent across:
+     AGENTS.md / .claude/CLAUDE.md / .gemini/GEMINI.md
+
+Output:
+  - check1_readme_commands=pass|fail
+  - check2_workflow_version=pass|fail
+  - overall=pass|fail
+  - diffs list
+
+Exit codes:
+  0: overall pass
+  1: overall fail
+  2: invalid arguments
+USAGE
+}
+
+fail_arg() {
+  echo "[$SCRIPT_NAME] FAIL: $*" >&2
+  exit 2
+}
+
+append_unique() {
+  local array_name="$1"
+  local item="$2"
+  local existing
+
+  eval "local values=(\"\${${array_name}[@]-}\")"
+  for existing in "${values[@]}"; do
+    if [ "$existing" = "$item" ]; then
+      return 0
+    fi
+  done
+
+  eval "${array_name}+=(\"\$item\")"
+}
+
+resolve_path() {
+  local path="$1"
+  if [ "${path#/}" != "$path" ]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$TARGET_ROOT" "$path"
+  fi
+}
+
+extract_workflow_version() {
+  local file="$1"
+  local match=""
+  local version=""
+
+  match="$(grep -Eio 'workflow[^0-9vV]{0,20}v?[0-9]+(\.[0-9]+){1,2}' "$file" | head -n 1 || true)"
+  if [ -z "$match" ]; then
+    match="$(grep -Eio '\b[vV][0-9]+(\.[0-9]+){1,2}\b' "$file" | head -n 1 || true)"
+  fi
+
+  if [ -n "$match" ]; then
+    version="$(printf '%s\n' "$match" | grep -Eo '[0-9]+(\.[0-9]+){1,2}' | head -n 1 || true)"
+  fi
+
+  printf '%s\n' "$version"
+}
+
+if [ "$#" -gt 1 ]; then
+  fail_arg "too many arguments"
+fi
+
+if [ "$#" -eq 1 ]; then
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      TARGET_ROOT="$1"
+      ;;
+  esac
+fi
+
+[ -d "$TARGET_ROOT" ] || fail_arg "project_root does not exist: $TARGET_ROOT"
+TARGET_ROOT="$(cd "$TARGET_ROOT" && pwd -P)"
+
+README_FILE="$TARGET_ROOT/README.md"
+
+check1_status="pass"
+check2_status="pass"
+overall_status="pass"
+diffs=()
+
+command_dirs=()
+declared_command_files=()
+slash_commands=()
+
+if [ ! -f "$README_FILE" ]; then
+  check1_status="fail"
+  overall_status="fail"
+  append_unique diffs "check1: missing README.md at ${README_FILE}"
+else
+  while IFS= read -r raw_token; do
+    [ -n "$raw_token" ] || continue
+    token="${raw_token#\`}"
+    token="${token%\`}"
+    token="${token%/}"
+    [ -n "$token" ] || continue
+
+    if [[ "$token" == *.md ]]; then
+      append_unique declared_command_files "$token"
+    else
+      append_unique command_dirs "$token"
+    fi
+  done < <(grep -Eo '`[^`]*\.(codex|claude|gemini)/commands/?[^`]*`' "$README_FILE" | LC_ALL=C sort -u)
+
+  while IFS= read -r command_name; do
+    [ -n "$command_name" ] || continue
+    append_unique slash_commands "$command_name"
+  done < <(grep -E '^[[:space:]]*[-*][[:space:]]*`/[A-Za-z0-9_-]+`' "$README_FILE" \
+    | sed -E 's/^[[:space:]]*[-*][[:space:]]*`\/([A-Za-z0-9_-]+)`.*/\1/' \
+    | LC_ALL=C sort -u)
+
+  for declared_file in "${declared_command_files[@]-}"; do
+    [ -n "$declared_file" ] || continue
+    declared_file_path="$(resolve_path "$declared_file")"
+    if [ ! -f "$declared_file_path" ]; then
+      check1_status="fail"
+      overall_status="fail"
+      append_unique diffs "check1: declared command file missing: ${declared_file}"
+    fi
+  done
+
+  for command_dir in "${command_dirs[@]-}"; do
+    [ -n "$command_dir" ] || continue
+    command_dir_path="$(resolve_path "$command_dir")"
+    if [ ! -d "$command_dir_path" ]; then
+      check1_status="fail"
+      overall_status="fail"
+      append_unique diffs "check1: declared command directory missing: ${command_dir}"
+    fi
+  done
+
+  for slash_command in "${slash_commands[@]-}"; do
+    [ -n "$slash_command" ] || continue
+    for command_dir in "${command_dirs[@]-}"; do
+      [ -n "$command_dir" ] || continue
+      expected_file="${command_dir}/${slash_command}.md"
+      expected_path="$(resolve_path "$expected_file")"
+      if [ ! -f "$expected_path" ]; then
+        check1_status="fail"
+        overall_status="fail"
+        append_unique diffs "check1: slash command declared but file missing: /${slash_command} -> ${expected_file}"
+      fi
+    done
+  done
+fi
+
+workflow_files=("AGENTS.md" ".claude/CLAUDE.md" ".gemini/GEMINI.md")
+workflow_versions=()
+workflow_version_labels=()
+
+for rel_file in "${workflow_files[@]-}"; do
+  [ -n "$rel_file" ] || continue
+  abs_file="${TARGET_ROOT}/${rel_file}"
+  if [ ! -f "$abs_file" ]; then
+    check2_status="fail"
+    overall_status="fail"
+    append_unique diffs "check2: missing workflow file: ${rel_file}"
+    continue
+  fi
+
+  extracted_version="$(extract_workflow_version "$abs_file")"
+  if [ -z "$extracted_version" ]; then
+    check2_status="fail"
+    overall_status="fail"
+    append_unique diffs "check2: workflow version string not found in ${rel_file}"
+    continue
+  fi
+
+  workflow_versions+=("$extracted_version")
+  workflow_version_labels+=("${rel_file}=v${extracted_version}")
+done
+
+if [ "${#workflow_versions[@]}" -gt 1 ]; then
+  baseline_version="${workflow_versions[0]}"
+  for candidate_version in "${workflow_versions[@]-}"; do
+    [ -n "$candidate_version" ] || continue
+    if [ "$candidate_version" != "$baseline_version" ]; then
+      check2_status="fail"
+      overall_status="fail"
+      append_unique diffs "check2: workflow version mismatch: $(IFS='; '; echo "${workflow_version_labels[*]}")"
+      break
+    fi
+  done
+fi
+
+echo "root=${TARGET_ROOT}"
+echo "check1_readme_commands=${check1_status}"
+echo "check2_workflow_version=${check2_status}"
+echo "overall=${overall_status}"
+echo "diffs:"
+
+if [ "${#diffs[@]}" -eq 0 ]; then
+  echo "- none"
+else
+  for diff in "${diffs[@]-}"; do
+    [ -n "$diff" ] || continue
+    echo "- ${diff}"
+  done
+fi
+
+if [ "$overall_status" = "pass" ]; then
+  exit 0
+fi
+
+exit 1

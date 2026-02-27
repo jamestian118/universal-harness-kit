@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="sanitized-publish-artifacts"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_CODE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+DEFAULT_ARTIFACT_ROOT="$DEFAULT_CODE_ROOT/_sanitized_publish_artifacts"
+DEFAULT_RETENTION_DAYS=14
+DEFAULT_KEEP_COUNT=3
+
+log() {
+  echo "[$SCRIPT_NAME] $*"
+}
+
+fail() {
+  echo "[$SCRIPT_NAME] FAIL: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./scripts/sanitized-publish-artifacts <command> [options]
+
+Commands:
+  new [--mode <full|incremental|debug>] [--root <dir>] [--run-id <id>]
+      Create a run directory and print its absolute path.
+      Default mode: incremental
+
+  list [--root <dir>]
+      List all existing run directories under <root>/runs (newest first).
+
+  cleanup [--days <N>] [--keep <N>] [--apply] [--root <dir>]
+      Keep newest N runs, then delete runs older than N days.
+      Default is dry-run; add --apply to execute deletion.
+
+  root [--root <dir>]
+      Print artifact root path.
+
+  -h, --help
+      Show this help.
+
+Defaults:
+  root: /Users/Zhuanz/Documents/Code/_sanitized_publish_artifacts
+  days: 14
+  keep: 3
+USAGE
+}
+
+require_non_negative_int() {
+  local value="$1"
+  local name="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] || fail "$name 必须是非负整数"
+}
+
+ensure_root() {
+  local root="$1"
+  mkdir -p "$root/runs"
+}
+
+resolve_root() {
+  local root="${1:-$DEFAULT_ARTIFACT_ROOT}"
+  printf '%s\n' "$root"
+}
+
+collect_runs_sorted() {
+  local runs_root="$1"
+  if [ ! -d "$runs_root" ]; then
+    return 0
+  fi
+  while IFS= read -r -d '' path; do
+    printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
+  done < <(find "$runs_root" -mindepth 1 -maxdepth 1 -type d -print0) | sort -nr
+}
+
+cmd_new() {
+  local mode="incremental"
+  local root="$DEFAULT_ARTIFACT_ROOT"
+  local run_id=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --mode)
+        [ "$#" -ge 2 ] || fail "--mode 需要一个参数"
+        mode="$2"
+        shift 2
+        ;;
+      --root)
+        [ "$#" -ge 2 ] || fail "--root 需要一个参数"
+        root="$2"
+        shift 2
+        ;;
+      --run-id)
+        [ "$#" -ge 2 ] || fail "--run-id 需要一个参数"
+        run_id="$2"
+        shift 2
+        ;;
+      *)
+        fail "new 不支持的参数: $1"
+        ;;
+    esac
+  done
+
+  case "$mode" in
+    full|incremental|debug)
+      ;;
+    *)
+      fail "--mode 仅支持 full|incremental|debug"
+      ;;
+  esac
+
+  ensure_root "$root"
+
+  if [ -z "$run_id" ]; then
+    run_id="$(date '+%Y%m%d_%H%M%S')"
+  fi
+
+  local run_dir="$root/runs/${mode}_${run_id}"
+  mkdir -p "$run_dir/reports" "$run_dir/work"
+
+  {
+    echo "mode=$mode"
+    echo "run_id=$run_id"
+    echo "created_at=$(date '+%Y-%m-%d %H:%M:%S %z')"
+    echo "host=$(hostname)"
+    echo "user=${USER:-unknown}"
+  } >"$run_dir/run.meta"
+
+  printf '%s\n' "$run_dir"
+}
+
+cmd_list() {
+  local root="$DEFAULT_ARTIFACT_ROOT"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --root)
+        [ "$#" -ge 2 ] || fail "--root 需要一个参数"
+        root="$2"
+        shift 2
+        ;;
+      *)
+        fail "list 不支持的参数: $1"
+        ;;
+    esac
+  done
+
+  ensure_root "$root"
+
+  local runs_root="$root/runs"
+  local has_any=0
+
+  while IFS=$'\t' read -r mtime path; do
+    has_any=1
+    printf '%s\t%s\n' "$(date -r "$mtime" '+%Y-%m-%d %H:%M:%S')" "$path"
+  done < <(collect_runs_sorted "$runs_root")
+
+  if [ "$has_any" -eq 0 ]; then
+    log "未找到 run 目录：$runs_root"
+  fi
+}
+
+cmd_cleanup() {
+  local retention_days="$DEFAULT_RETENTION_DAYS"
+  local keep_count="$DEFAULT_KEEP_COUNT"
+  local apply=0
+  local root="$DEFAULT_ARTIFACT_ROOT"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --days)
+        [ "$#" -ge 2 ] || fail "--days 需要一个参数"
+        retention_days="$2"
+        shift 2
+        ;;
+      --keep)
+        [ "$#" -ge 2 ] || fail "--keep 需要一个参数"
+        keep_count="$2"
+        shift 2
+        ;;
+      --apply)
+        apply=1
+        shift
+        ;;
+      --root)
+        [ "$#" -ge 2 ] || fail "--root 需要一个参数"
+        root="$2"
+        shift 2
+        ;;
+      *)
+        fail "cleanup 不支持的参数: $1"
+        ;;
+    esac
+  done
+
+  require_non_negative_int "$retention_days" "--days"
+  require_non_negative_int "$keep_count" "--keep"
+
+  ensure_root "$root"
+
+  local runs_root="$root/runs"
+  local cutoff_epoch
+  cutoff_epoch=$(( $(date +%s) - retention_days * 86400 ))
+
+  local index=0
+  local delete_count=0
+  local delete_total_bytes=0
+
+  while IFS=$'\t' read -r mtime path; do
+    [ -n "$path" ] || continue
+    index=$((index + 1))
+
+    local decision="keep"
+    local reason="recent"
+
+    if [ "$index" -le "$keep_count" ]; then
+      reason="newest-$keep_count"
+    elif [ "$mtime" -lt "$cutoff_epoch" ]; then
+      decision="delete"
+      reason="older-than-${retention_days}d"
+    fi
+
+    if [ "$decision" = "delete" ]; then
+      local bytes
+      bytes="$(du -sk "$path" | awk '{print $1 * 1024}')"
+      delete_total_bytes=$((delete_total_bytes + bytes))
+      delete_count=$((delete_count + 1))
+      printf '[%s] %s (%s)\n' "$decision" "$path" "$reason"
+      if [ "$apply" -eq 1 ]; then
+        rm -rf "$path"
+      fi
+    else
+      printf '[%s] %s (%s)\n' "$decision" "$path" "$reason"
+    fi
+  done < <(collect_runs_sorted "$runs_root")
+
+  if [ "$delete_count" -eq 0 ]; then
+    log "无需清理。"
+    return
+  fi
+
+  local mib=$((delete_total_bytes / 1024 / 1024))
+  if [ "$apply" -eq 1 ]; then
+    log "已清理 $delete_count 个目录，释放约 ${mib} MiB。"
+  else
+    log "dry-run：可清理 $delete_count 个目录，预计释放约 ${mib} MiB；添加 --apply 执行删除。"
+  fi
+}
+
+cmd_root() {
+  local root="$DEFAULT_ARTIFACT_ROOT"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --root)
+        [ "$#" -ge 2 ] || fail "--root 需要一个参数"
+        root="$2"
+        shift 2
+        ;;
+      *)
+        fail "root 不支持的参数: $1"
+        ;;
+    esac
+  done
+
+  printf '%s\n' "$(resolve_root "$root")"
+}
+
+main() {
+  local cmd="${1:-}"
+  if [ -z "$cmd" ]; then
+    usage
+    exit 1
+  fi
+  shift || true
+
+  case "$cmd" in
+    new)
+      cmd_new "$@"
+      ;;
+    list)
+      cmd_list "$@"
+      ;;
+    cleanup)
+      cmd_cleanup "$@"
+      ;;
+    root)
+      cmd_root "$@"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      fail "不支持的命令: $cmd"
+      ;;
+  esac
+}
+
+main "$@"
