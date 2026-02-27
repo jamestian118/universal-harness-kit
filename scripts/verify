@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT_DIR"
+
+overall="pass"
+
+die_step() {
+  overall="fail"
+}
+
+run_step() {
+  local name="$1"
+  shift
+
+  echo "[verify] RUN: $name"
+  if "$@"; then
+    echo "[verify] PASS: $name"
+  else
+    echo "[verify] FAIL: $name"
+    die_step
+  fi
+}
+
+step_bash_syntax() {
+  bash -n new_project.sh scripts/agent-policy-stack scripts/check-doc-file-parity scripts/verify
+}
+
+step_shellcheck() {
+  if ! command -v shellcheck >/dev/null 2>&1; then
+    echo "[verify][shellcheck] WARN: shellcheck 未安装，跳过（建议：brew install shellcheck）"
+    return 0
+  fi
+
+  shellcheck new_project.sh scripts/agent-policy-stack scripts/check-doc-file-parity scripts/verify
+}
+
+step_smoke_new_project_help() {
+  ./new_project.sh --help >/dev/null
+}
+
+step_smoke_new_project_name_validation() {
+  local out
+  out="$(mktemp "${TMPDIR:-/tmp}/uhk-verify-name.XXXXXX")"
+
+  if ./new_project.sh "BadName" --lang python >"$out" 2>&1; then
+    echo "[verify][name-validation] expected failure for invalid project name"
+    cat "$out"
+    rm -f "$out"
+    return 1
+  fi
+
+  if ! grep -q "project-name 不合法" "$out"; then
+    echo "[verify][name-validation] missing expected error message"
+    cat "$out"
+    rm -f "$out"
+    return 1
+  fi
+
+  rm -f "$out"
+}
+
+step_smoke_policy_json_schema() {
+  local out schema
+  out="$(mktemp "${TMPDIR:-/tmp}/uhk-policy-json.XXXXXX")"
+  schema="$ROOT_DIR/docs/agent-policy-stack.output.schema.json"
+
+  ./scripts/agent-policy-stack --tool codex --cwd "$ROOT_DIR" --json --strict --strict-profile harness >"$out"
+
+  if python3 -c 'import jsonschema' >/dev/null 2>&1; then
+    python3 -m jsonschema -i "$out" "$schema"
+  else
+    python3 - "$out" "$schema" <<'PY'
+import json
+import pathlib
+import sys
+
+output_path = pathlib.Path(sys.argv[1])
+schema_path = pathlib.Path(sys.argv[2])
+
+obj = json.loads(output_path.read_text(encoding="utf-8"))
+schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+required_root = schema.get("required", [])
+for key in required_root:
+    if key not in obj:
+        raise SystemExit(f"missing required key: {key}")
+
+for enum_key in ("tool", "strict_profile"):
+    allowed = schema["properties"][enum_key].get("enum", [])
+    value = obj.get(enum_key)
+    if value not in allowed:
+        raise SystemExit(f"invalid {enum_key}: {value!r}, allowed={allowed}")
+
+checks = obj.get("required_checks")
+if not isinstance(checks, list) or not checks:
+    raise SystemExit("required_checks must be a non-empty list")
+
+check_required = schema["properties"]["required_checks"]["items"].get("required", [])
+check_status_enum = schema["properties"]["required_checks"]["items"]["properties"]["status"].get("enum", [])
+for idx, item in enumerate(checks):
+    if not isinstance(item, dict):
+        raise SystemExit(f"required_checks[{idx}] must be object")
+    for key in check_required:
+        if key not in item:
+            raise SystemExit(f"required_checks[{idx}] missing key: {key}")
+    if item.get("status") not in check_status_enum:
+        raise SystemExit(f"required_checks[{idx}].status invalid: {item.get('status')!r}")
+
+strict = obj.get("strict")
+if not isinstance(strict, dict):
+    raise SystemExit("strict must be an object")
+
+strict_required = schema["properties"]["strict"].get("required", [])
+for key in strict_required:
+    if key not in strict:
+        raise SystemExit(f"strict missing key: {key}")
+
+strict_result_enum = schema["properties"]["strict"]["properties"]["result"].get("enum", [])
+if strict.get("result") not in strict_result_enum:
+    raise SystemExit(f"strict.result invalid: {strict.get('result')!r}")
+
+reason = strict.get("reason")
+if reason is not None and not isinstance(reason, str):
+    raise SystemExit("strict.reason must be string or null")
+
+print("fallback schema validation passed")
+PY
+  fi
+
+  rm -f "$out"
+}
+
+run_step "bash_syntax" step_bash_syntax
+run_step "shellcheck" step_shellcheck
+run_step "smoke_new_project_help" step_smoke_new_project_help
+run_step "smoke_new_project_name_validation" step_smoke_new_project_name_validation
+run_step "smoke_policy_json_schema" step_smoke_policy_json_schema
+
+if [[ "$overall" != "pass" ]]; then
+  echo "[verify] FAIL"
+  exit 1
+fi
+
+echo "[verify] OK"

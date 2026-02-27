@@ -2,19 +2,29 @@
 set -euo pipefail
 
 # new_project.sh
-# 作用：从 profiles/<lang>/template/ 复制骨架到 /Users/Zhuanz/Documents/Code/<project-name>/
+# 作用：从 profiles/<lang>/template/ 复制骨架到目标目录（默认 /Users/Zhuanz/Documents/Code/<project-name>/）
 # 说明：不做 OS 兼容性探测；默认目标环境为 macOS + bash + python3
 
 usage() {
   cat <<'USAGE'
 用法：
-  ./new_project.sh <project-name> --lang <python|node|go|generic>
+  ./new_project.sh <project-name> --lang <python|node|go|generic> [--dest <path>]
+
+选项：
+  --dest <path>
+      项目目标根目录（优先级高于 HARNESS_DEST_ROOT）
+
+  HARNESS_DEST_ROOT
+      当未传 --dest 时的目标根目录
+      默认：/Users/Zhuanz/Documents/Code
 
 示例：
   ./new_project.sh demo-api --lang python
   ./new_project.sh web-tool --lang node
   ./new_project.sh cli-go --lang go
   ./new_project.sh misc --lang generic
+  ./new_project.sh demo-local --lang python --dest /tmp/uhk-demo
+  HARNESS_DEST_ROOT=/tmp/uhk-env ./new_project.sh demo-env --lang generic
 USAGE
 }
 
@@ -23,15 +33,35 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
 PROJECT_NAME="$1"
 shift || true
 
 LANG="python"
+DEST_ROOT="${HARNESS_DEST_ROOT:-/Users/Zhuanz/Documents/Code}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --lang)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--lang 需要非空值"
+        usage
+        exit 2
+      fi
       LANG="${2:-}"
+      shift 2
+      ;;
+    --dest)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "--dest 需要非空值"
+        usage
+        exit 2
+      fi
+      DEST_ROOT="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -51,6 +81,13 @@ if [[ -z "$PROJECT_NAME" ]]; then
   exit 2
 fi
 
+PROJECT_NAME_REGEX='^[a-z0-9][a-z0-9._-]{0,62}$'
+if [[ ! "$PROJECT_NAME" =~ $PROJECT_NAME_REGEX ]]; then
+  echo "project-name 不合法：$PROJECT_NAME"
+  echo "要求：仅允许小写字母/数字/点/下划线/短横线，且必须以字母或数字开头（长度 1-63）"
+  exit 2
+fi
+
 case "$LANG" in
   python|node|go|generic) ;;
   *)
@@ -61,7 +98,12 @@ esac
 
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$KIT_DIR/profiles/$LANG/template"
-DEST_ROOT="/Users/Zhuanz/Documents/Code"
+if [[ -z "$DEST_ROOT" ]]; then
+  echo "目标根目录不能为空（请传 --dest 或设置 HARNESS_DEST_ROOT）"
+  exit 2
+fi
+mkdir -p "$DEST_ROOT"
+DEST_ROOT="$(cd "$DEST_ROOT" && pwd -P)"
 DEST_DIR="$DEST_ROOT/$PROJECT_NAME"
 
 if [[ ! -d "$SRC_DIR" ]]; then
@@ -74,7 +116,6 @@ if [[ -e "$DEST_DIR" ]]; then
   exit 2
 fi
 
-mkdir -p "$DEST_ROOT"
 mkdir -p "$DEST_DIR"
 
 # 复制模板（包含隐藏目录）

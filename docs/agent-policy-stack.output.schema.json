@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uhk.local/schemas/agent-policy-stack.output.schema.json",
+  "title": "agent-policy-stack --json output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tool",
+    "cwd",
+    "global_file",
+    "workflow_root",
+    "copy_project_root",
+    "copy_agents_file",
+    "strict_profile",
+    "required_checks",
+    "strict"
+  ],
+  "properties": {
+    "tool": {
+      "type": "string",
+      "enum": ["codex", "claude", "gemini"]
+    },
+    "cwd": { "type": "string", "minLength": 1 },
+    "global_file": { "type": "string", "minLength": 1 },
+    "workflow_root": { "type": "string", "minLength": 1 },
+    "copy_project_root": {
+      "type": ["string", "null"]
+    },
+    "copy_agents_file": {
+      "type": ["string", "null"]
+    },
+    "strict_profile": {
+      "type": "string",
+      "enum": ["compat", "harness"]
+    },
+    "required_checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "detail"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "skip", "warn"]
+          },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "strict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "profile",
+        "copy_project_root_required",
+        "required_items",
+        "result",
+        "reason"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "profile": {
+          "type": "string",
+          "enum": ["compat", "harness"]
+        },
+        "copy_project_root_required": { "type": "boolean" },
+        "required_items": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "result": {
+          "type": "string",
+          "enum": ["pass", "fail"]
+        },
+        "reason": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

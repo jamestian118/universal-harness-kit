@@ -1,8 +1,9 @@
 # AGENTS.md（Repo-Local Minimal）
 
 ## 1) Policy Stack 调用
-- 每次进入项目（主 agent + 子 agent）前，先运行：
-  `/Users/Zhuanz/Documents/Code/universal-harness-kit/scripts/agent-policy-stack --tool <codex|claude|gemini> --cwd "$PWD" --strict --strict-profile harness`
+- 每次进入项目（主 agent + 子 agent）前，先设置 `UHK_ROOT`（指向 universal-harness-kit 根目录）并运行：
+  `"${UHK_ROOT}/scripts/agent-policy-stack" --tool <codex|claude|gemini> --cwd "$PWD" --strict --strict-profile harness`
+- 若环境中未设置 `UHK_ROOT`，先执行：`export UHK_ROOT="$HOME/Documents/Code/universal-harness-kit"`
 
 ## 2) Repo 结构（Map）
 - `src/`：业务代码

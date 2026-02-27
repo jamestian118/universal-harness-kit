@@ -293,6 +293,11 @@ if COPY_PROJECT_ROOT_CANDIDATE="$(find_copy_project_root "$CWD")"; then
   COPY_PROJECT_ROOT="$COPY_PROJECT_ROOT_CANDIDATE"
 fi
 
+# workflow root 本身属于 policy 维护上下文，不应被当作 copy-project root。
+if [ "$CWD" = "$WORKFLOW_ROOT" ]; then
+  COPY_PROJECT_ROOT=""
+fi
+
 COPY_AGENTS_FILE=""
 if [ -n "$COPY_PROJECT_ROOT" ]; then
   COPY_AGENTS_FILE="$COPY_PROJECT_ROOT/AGENTS.md"

@@ -81,6 +81,10 @@ chmod +x ./scripts/agent-policy-stack
 - `copy_gemini_exists`
 - `copy_project_root_relaxed`（仅在 HOME/workflow 根场景出现，状态为 `warn`）
 
+JSON contract schema：
+
+- `docs/agent-policy-stack.output.schema.json`
+
 状态说明：
 
 - `pass`：检查通过
@@ -113,6 +117,13 @@ chmod +x ./scripts/agent-policy-stack
 ./scripts/agent-policy-stack --tool codex --cwd /Users/Zhuanz/Documents/Code/demo-api --json --strict --strict-profile harness
 ```
 
+5) 用 schema 校验 `--json` 输出：
+
+```bash
+./scripts/agent-policy-stack --tool codex --cwd "$PWD" --json --strict --strict-profile harness \
+  | python3 -m jsonschema -i /dev/stdin ./docs/agent-policy-stack.output.schema.json
+```
+
 ### 输入 / 输出与退出码
 
 输入：
@@ -134,7 +145,7 @@ chmod +x ./scripts/agent-policy-stack
 
 1) `copy_project_root` 为空
 
-- 说明：从 `--cwd` 向上没有找到项目级 `AGENTS.md`（或只命中 `$HOME/AGENTS.md`）
+- 说明：从 `--cwd` 向上没有找到项目级 `AGENTS.md`（或只命中 `$HOME/AGENTS.md`）；当 `--cwd` 等于 workflow root 时也会强制保持为空（按维护上下文处理）
 - 处理：确认你传入的是由 harness 模板复制出的项目目录，或切换到正确目录后重试
 
 2) strict 模式失败
@@ -155,6 +166,11 @@ chmod +x ./scripts/agent-policy-stack
   - 明显明文赋值：`password/token/secret/api_key` 等键名直接赋 literal
 - 已做误报抑制：环境变量引用（`$VAR`/`${VAR}`/`process.env`/`getenv`）、常见占位值（`example/changeme/placeholder/redacted`）会被忽略
 - 处理：改为环境变量或 keychain 注入后重跑
+
+4) 本地缺少 `python3 -m jsonschema`
+
+- 说明：schema 校验工具未安装
+- 处理：可先运行 `./scripts/verify`（内置 fallback 结构校验），或安装 `jsonschema`
 
 ---
 
@@ -240,6 +256,10 @@ Typical `required_checks` entries:
 - `copy_gemini_exists`
 - `copy_project_root_relaxed` (HOME/workflow-root only, status `warn`)
 
+JSON contract schema:
+
+- `docs/agent-policy-stack.output.schema.json`
+
 Status semantics:
 
 - `pass`: check passed
@@ -272,6 +292,13 @@ Status semantics:
 ./scripts/agent-policy-stack --tool codex --cwd /Users/Zhuanz/Documents/Code/demo-api --json --strict --strict-profile harness
 ```
 
+5) Validate `--json` output against schema:
+
+```bash
+./scripts/agent-policy-stack --tool codex --cwd "$PWD" --json --strict --strict-profile harness \
+  | python3 -m jsonschema -i /dev/stdin ./docs/agent-policy-stack.output.schema.json
+```
+
 ### Inputs / Outputs / Exit Codes
 
 Inputs:
@@ -293,7 +320,7 @@ Exit codes:
 
 1) `copy_project_root` is empty
 
-- Meaning: no project-level `AGENTS.md` found while walking up from `--cwd` (or only `$HOME/AGENTS.md` is found)
+- Meaning: no project-level `AGENTS.md` found while walking up from `--cwd` (or only `$HOME/AGENTS.md` is found); it is also forced empty when `--cwd` equals workflow root (maintenance context)
 - Fix: pass the correct harness-generated project directory
 
 2) strict mode fails
@@ -316,3 +343,8 @@ Exit codes:
   - Environment references (`$VAR`, `${VAR}`, `process.env`, `getenv`) are ignored
   - Common placeholders (`example/changeme/placeholder/redacted`) are ignored
 - Fix: switch to environment-variable or keychain injection, then rerun
+
+4) Missing `python3 -m jsonschema`
+
+- Meaning: the JSON Schema validator module is not installed
+- Fix: run `./scripts/verify` first (it has a fallback structural validation), or install `jsonschema`
