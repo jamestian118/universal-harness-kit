@@ -195,3 +195,9 @@
 ## 当前状态：[已完成 UHK Gate lane Phase1 输入盘点；新增 .ai/tmp-phase1-gate-input.md；strict 已执行并 pass（含 copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase1-gate-input.md]
 ## 下一步：[1) 由 owner 确认固定 6 项目清单是否需要替换 2) 对缺少 scripts/secrets-check 的仓补齐最小脚本骨架 3) 逐仓执行 Gate1 命令模板并收集 strict 输出]
 ## 已知问题：[当前固定 6 项目清单基于现状仓库约定（claude-code-api-config / claude-session-manager / cli-handoff-bundle / git-privacy-guard / oh-my-orch / uhk-audit-20260226-224224）；若治理口径变更需更新清单后重跑盘点]
+
+---
+
+## 当前状态：[已完成 UHK Phase 3 gate lane；新增 .ai/tmp-phase3-gate-commands.md；strict 已执行并 pass（strict_result=pass，copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase3-gate-commands.md]
+## 下一步：[1) 让 csm 可执行路径进入 PATH（当前 command -v csm = NOT_FOUND）2) 按模板执行 OMO/CSM 命令并落盘 .ai/tmp-phase3-*.out 3) 按 debug 规则（R1 && R2）判定 gate]
+## 已知问题：[当前 OMO 基线仅输出 help 文本，未出现 debug 字段/行；CSM 基线为 command not found（exit 127），两者均未达到 Gate 3 通过条件]
