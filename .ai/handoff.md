@@ -242,3 +242,53 @@
 ## 当前状态：[已完成 UHK Phase 5 gate lane 文档产物；strict 已执行并 pass（strict_result=pass，copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase5-gate-commands.md]
 ## 下一步：[1) 按矩阵逐仓执行 verify/tests 并填汇总表 2) 对缺失 `scripts/test(s)` 的 4 仓确认 tests 口径（n-a 或补统一入口）3) 将汇总结果写回 handoff]
 ## 已知问题：[`claude-code-api-config`/`claude-session-manager`/`cli-handoff-bundle`/`git-privacy-guard` 暂无统一 `scripts/test(s)`；当前模板默认 `NO_STANDARD_TEST_ENTRY`]
+
+---
+
+## Milestone Update (2026-02-27): Phase 6 Gate Command Matrix (UHK support lane)
+
+## Goal / DoD
+- 目标：产出 Gate 6 命令矩阵，覆盖 `omo --help`、`csm --help`、Gate 判定规则（可读性 + 信息完整性）与主线程可直接执行模板。
+- DoD：
+  - 新增 `.ai/tmp-phase6-gate-commands.md`，结构简洁可复用（复用 phase5 文档骨架）。
+  - 在 UHK root 记录 strict 通过证据。
+  - 本仓验证链通过：`./scripts/verify`；`./scripts/secrets-check` 若存在则通过（当前不存在，按规则 skip）。
+
+## Evidence (Commands + Key Output)
+1. strict gate
+- Command:
+  - `/Users/Zhuanz/Documents/Code/universal-harness-kit/scripts/agent-policy-stack --tool codex --cwd /Users/Zhuanz/Documents/Code/universal-harness-kit --strict --strict-profile harness`
+- Key output:
+  - `strict_result=pass`
+  - `copy_project_root_relaxed: warn`
+
+2. help baseline 探测
+- Commands:
+  - `omo --help`
+  - `csm --help`
+- Key output:
+  - `omo_exit=0`，且输出包含 `usage:`、`pipeline`、`team`、`resume`
+  - `csm_exit=0`，且输出包含 `usage:`、`handoff`、`mcp`、`memory-sync`
+
+3. verify
+- Command:
+  - `./scripts/verify`
+- Key output:
+  - `[verify] OK`
+  - `shellcheck` 为 WARN/skip（环境未安装），其余检查与 shell_tests 通过。
+
+4. secrets-check（条件执行）
+- Command:
+  - `if [ -x ./scripts/secrets-check ]; then ./scripts/secrets-check; else echo "[secrets-check] SKIP"; fi`
+- Key output:
+  - `[secrets-check] SKIP: ./scripts/secrets-check not found or not executable`
+
+## Done
+- 新增文件：`.ai/tmp-phase6-gate-commands.md`
+  - 包含 Gate 6 命令矩阵（OMO/CSM help）
+  - 包含 Readability/Completeness 判定规则与 PASS/FAIL/NEEDS_OWNER_INPUT 决策
+  - 包含主线程一键执行模板与回填表
+
+## 当前状态：[已完成 UHK Phase 6 support lane 文档产物；strict 与 verify 均通过；关键文件：.ai/tmp-phase6-gate-commands.md]
+## 下一步：[1) 主线程按模板执行并回填 Gate 6 结果 2) 如 OMO/CSM help 关键词漂移，由 owner 决定是否放宽关键字门槛]
+## 已知问题：[`./scripts/secrets-check` 当前不存在（按“若存在则执行”规则已记录 skip）]
