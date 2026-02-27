@@ -373,3 +373,7 @@
 ## 当前状态：[已完成 Phase 7 UHK lane 7.1/7.8/7.9/7.10；已补 CI + bootstrap + self-test + 路径参数化 + 双语文档；strict/verify 已通过]
 ## 下一步：[1) 审核并提交本次改动 2) 如需可补一次 GitHub Actions 实跑验证 shellcheck gate 3) 若 owner 要求，可将 root verify workflow 同步到 profile template 的 workflow contract]
 ## 已知问题：[本地 shellcheck 缺失仅输出 WARN；CI 已安装 shellcheck 并可强制执行]
+
+## 2026-02-27 Phase 8 UHK（8.7）
+- 新增 `CHANGELOG.md`（0.1.0 基线条目）。
+- 验证：strict pass，`./scripts/verify` pass（见 `/tmp/phase8-universal-harness-kit.log`）。
