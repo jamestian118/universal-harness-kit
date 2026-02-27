@@ -24,7 +24,13 @@ run_step() {
 }
 
 step_bash_syntax() {
-  bash -n new_project.sh scripts/agent-policy-stack scripts/check-doc-file-parity scripts/verify
+  bash -n \
+    new_project.sh \
+    scripts/agent-policy-stack \
+    scripts/check-doc-file-parity \
+    scripts/verify \
+    tests/test_new_project.sh \
+    tests/test_policy_stack.sh
 }
 
 step_shellcheck() {
@@ -33,7 +39,13 @@ step_shellcheck() {
     return 0
   fi
 
-  shellcheck new_project.sh scripts/agent-policy-stack scripts/check-doc-file-parity scripts/verify
+  shellcheck \
+    new_project.sh \
+    scripts/agent-policy-stack \
+    scripts/check-doc-file-parity \
+    scripts/verify \
+    tests/test_new_project.sh \
+    tests/test_policy_stack.sh
 }
 
 step_smoke_new_project_help() {
@@ -132,11 +144,17 @@ PY
   rm -f "$out"
 }
 
+step_shell_tests() {
+  ./tests/test_new_project.sh
+  ./tests/test_policy_stack.sh
+}
+
 run_step "bash_syntax" step_bash_syntax
 run_step "shellcheck" step_shellcheck
 run_step "smoke_new_project_help" step_smoke_new_project_help
 run_step "smoke_new_project_name_validation" step_smoke_new_project_name_validation
 run_step "smoke_policy_json_schema" step_smoke_policy_json_schema
+run_step "shell_tests" step_shell_tests
 
 if [[ "$overall" != "pass" ]]; then
   echo "[verify] FAIL"

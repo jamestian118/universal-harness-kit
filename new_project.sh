@@ -91,7 +91,7 @@ fi
 case "$LANG" in
   python|node|go|generic) ;;
   *)
-    echo "不支持的 lang：$LANG（支持：python|node|go|generic）"
+    echo "不支持的 lang：${LANG}（支持：python|node|go|generic）"
     exit 2
     ;;
 esac

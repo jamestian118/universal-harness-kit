@@ -72,6 +72,10 @@ HARNESS_DEST_ROOT=/tmp/uhk-env ./new_project.sh misc --lang generic
 - 原因：`--lang` 不在支持范围或模板目录损坏
 - 处理：确认 `profiles/<lang>/template/` 存在
 
+4. `不支持的 lang：<lang>`
+- 原因：`--lang` 不在 `python|node|go|generic` 中
+- 处理：改用受支持的语言 profile
+
 ---
 
 ## English
@@ -145,3 +149,7 @@ Outputs:
 3. `模板不存在`
 - Cause: unsupported `--lang` or missing template directory
 - Fix: confirm `profiles/<lang>/template/` exists
+
+4. `不支持的 lang：<lang>`
+- Cause: `--lang` is not one of `python|node|go|generic`
+- Fix: use a supported profile

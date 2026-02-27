@@ -201,3 +201,9 @@
 ## 当前状态：[已完成 UHK Phase 3 gate lane；新增 .ai/tmp-phase3-gate-commands.md；strict 已执行并 pass（strict_result=pass，copy_project_root_relaxed: warn）；关键文件：.ai/tmp-phase3-gate-commands.md]
 ## 下一步：[1) 让 csm 可执行路径进入 PATH（当前 command -v csm = NOT_FOUND）2) 按模板执行 OMO/CSM 命令并落盘 .ai/tmp-phase3-*.out 3) 按 debug 规则（R1 && R2）判定 gate]
 ## 已知问题：[当前 OMO 基线仅输出 help 文本，未出现 debug 字段/行；CSM 基线为 command not found（exit 127），两者均未达到 Gate 3 通过条件]
+
+---
+
+## 当前状态：[已完成 Phase 4 UHK lane 4.7/4.8；新增 tests/test_new_project.sh 与 tests/test_policy_stack.sh；scripts/verify 已纳入 shell_tests；修复 new_project.sh 在 unsupported --lang 分支的 unbound variable；同步 docs/verify.usage.zh-en.md 与 docs/new_project.usage.zh-en.md]
+## 下一步：[1) 若 CI 需强制 shellcheck，可在 runner 安装 shellcheck 后复跑 scripts/verify 2) 若要扩展回归维度，可继续补充 tests/ 下更多 strict-profile 场景（如 contract drift/fail reason 细粒度断言）]
+## 已知问题：[当前环境未安装 shellcheck，scripts/verify 输出 WARN 后跳过；其余步骤与 shell_tests 均通过]

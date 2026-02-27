@@ -11,6 +11,7 @@
 3. `new_project.sh --help` smoke
 4. `new_project.sh` 项目名正则校验 smoke
 5. `agent-policy-stack --json` 输出结构校验（基于 schema）
+6. shell test suites：`tests/test_new_project.sh` + `tests/test_policy_stack.sh`
 
 ### 前置条件
 
@@ -37,6 +38,8 @@
 [verify] RUN: shellcheck
 [verify][shellcheck] WARN: shellcheck 未安装，跳过（建议：brew install shellcheck）
 [verify] PASS: shellcheck
+[verify] RUN: shell_tests
+[verify] PASS: shell_tests
 ...
 [verify] OK
 ```
@@ -51,6 +54,14 @@
 - 说明：`agent-policy-stack --json` 输出与 schema 不一致
 - 处理：先跑 `./scripts/agent-policy-stack --tool codex --cwd "$PWD" --json` 查看实际输出字段
 
+3. `shell_tests` 失败（`test_new_project.sh`）
+- 说明：`new_project.sh` 的行为与契约不一致（如 project-name 校验、scaffold 结果、git 初始化）
+- 处理：先单独运行 `./tests/test_new_project.sh`，根据失败断言修复脚本逻辑
+
+4. `shell_tests` 失败（`test_policy_stack.sh`）
+- 说明：`agent-policy-stack` 的 strict/harness 行为、JSON 字段或退出码漂移
+- 处理：先单独运行 `./tests/test_policy_stack.sh`，再对照 `docs/agent-policy-stack.output.schema.json` 校验输出结构
+
 ---
 
 ## English
@@ -64,6 +75,7 @@
 3. `new_project.sh --help` smoke
 4. project-name regex validation smoke for `new_project.sh`
 5. schema-based structure validation for `agent-policy-stack --json`
+6. shell test suites: `tests/test_new_project.sh` + `tests/test_policy_stack.sh`
 
 ### Prerequisites
 
@@ -90,6 +102,8 @@
 [verify] RUN: shellcheck
 [verify][shellcheck] WARN: shellcheck 未安装，跳过（建议：brew install shellcheck）
 [verify] PASS: shellcheck
+[verify] RUN: shell_tests
+[verify] PASS: shell_tests
 ...
 [verify] OK
 ```
@@ -103,3 +117,11 @@
 2. `smoke_policy_json_schema` fails
 - Meaning: `agent-policy-stack --json` output drifts from the schema
 - Fix: run `./scripts/agent-policy-stack --tool codex --cwd "$PWD" --json` and compare fields against schema
+
+3. `shell_tests` fails (`test_new_project.sh`)
+- Meaning: `new_project.sh` behavior drift (for example: project-name validation, scaffold contract, git init)
+- Fix: run `./tests/test_new_project.sh` directly and fix logic based on failing assertions
+
+4. `shell_tests` fails (`test_policy_stack.sh`)
+- Meaning: `agent-policy-stack` strict/harness behavior, JSON fields, or exit codes drifted
+- Fix: run `./tests/test_policy_stack.sh` directly, then cross-check with `docs/agent-policy-stack.output.schema.json`
